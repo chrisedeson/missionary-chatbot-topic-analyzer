@@ -320,11 +320,9 @@ class AnalysisService:
         """
         Get history of analysis runs.
         """
-        db = next(get_db())
-        
         try:
-            # This would be replaced with actual Prisma query
-            # For now, return the active runs
+            # For now, return the active runs (mock implementation)
+            # TODO: Replace with actual Prisma query when database is connected
             history = []
             
             for run_id, run_data in self.active_runs.items():
@@ -345,8 +343,6 @@ class AnalysisService:
         except Exception as e:
             logger.error(f"Error getting analysis history: {e}")
             raise
-        finally:
-            db.close()
     
     async def get_topics(self, run_id: Optional[str] = None) -> List[Dict]:
         """

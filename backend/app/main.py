@@ -6,7 +6,7 @@ import structlog
 
 from app.core.config import settings
 from app.core.database import init_db
-from app.api.routes import auth, dashboard, upload, analysis
+from app.api.routes import auth, dashboard, upload, analysis, sheets
 
 # Configure structured logging
 structlog.configure(
@@ -70,6 +70,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(upload.router, prefix="/api/upload", tags=["upload"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
+app.include_router(sheets.router, prefix="/api/sheets", tags=["sheets"])
 
 
 @app.get("/")

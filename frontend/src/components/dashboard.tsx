@@ -25,7 +25,7 @@ export function Dashboard({ isDeveloper }: DashboardProps) {
   // Fetch dashboard data
   const { data: dashboardData, refetch: refetchDashboard, isLoading } = useQuery({
     queryKey: ["dashboard"],
-    queryFn: () => apiClient.getDashboard(),
+    queryFn: () => apiClient.getDashboardMetrics(),
     refetchInterval: 30000, // Refresh every 30 seconds
   });
 

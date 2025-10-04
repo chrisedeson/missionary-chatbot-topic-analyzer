@@ -212,7 +212,8 @@ class ApiClient {
   }
 
   async getAnalysisRuns(): Promise<AnalysisRun[]> {
-    return this.request('/analysis/runs')
+    const response = await this.request<{runs: AnalysisRun[]}>('/analysis/runs')
+    return response.runs
   }
 
   async getTopics(runId: string): Promise<Topic[]> {

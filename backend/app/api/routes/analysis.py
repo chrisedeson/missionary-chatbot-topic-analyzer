@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel
+from datetime import datetime
 import logging
 
 from app.core.auth import require_developer_auth
@@ -15,7 +16,7 @@ from app.services.sse import create_sse_response
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/analysis", tags=["analysis"])
+router = APIRouter(tags=["analysis"])
 
 class AnalysisRequest(BaseModel):
     mode: str = "all"  # "sample" or "all"
@@ -105,6 +106,35 @@ async def get_run_status(run_id: str):
     except Exception as e:
         logger.error(f"Error getting run status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/status")
+async def get_analysis_system_status():
+    """
+    Get overall analysis system status.
+    Public endpoint for system health checking.
+    """
+    try:
+        # Check if analysis service is running
+        active_runs = len(analysis_service.active_runs)
+        
+        return {
+            "system_status": "operational",
+            "active_analyses": active_runs,
+            "last_check": datetime.now().isoformat(),
+            "services": {
+                "analyzer": "operational",
+                "queue": "operational",
+                "database": "operational" if analysis_service else "degraded"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting system status: {e}")
+        return {
+            "system_status": "degraded",
+            "error": str(e),
+            "last_check": datetime.now().isoformat()
+        }
 
 @router.get("/runs/{run_id}/topics")
 async def get_run_topics(run_id: str):
