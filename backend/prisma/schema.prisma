@@ -1,9 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
   output   = "../generated/prisma"
@@ -12,4 +9,133 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+// Enable pgvector extension
+generator client_extensions {
+  provider = "prisma-client-extensions"
+}
+
+// Questions table with embedding support
+model Question {
+  id          String   @id @default(cuid())
+  text        String   @db.Text
+  embedding   Float[]? // pgvector embedding (1536 dimensions for text-embedding-3-small)
+  
+  // Metadata
+  date        DateTime?
+  country     String?
+  state       String?
+  userLanguage String? @map("user_language")
+  
+  // Classification results
+  similarityScore Float?   @map("similarity_score")
+  matchedTopic    String?  @map("matched_topic")
+  isNewTopic      Boolean  @default(false) @map("is_new_topic")
+  
+  // Relationships
+  topicId     String?
+  topic       Topic?   @relation(fields: [topicId], references: [id])
+  
+  // Analysis tracking
+  analysisRunId String?      @map("analysis_run_id")
+  analysisRun   AnalysisRun? @relation(fields: [analysisRunId], references: [id])
+  
+  // Audit fields
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  @@map("questions")
+}
+
+// Topics and subtopics from Elder Edwards' curated list
+model Topic {
+  id       String @id @default(cuid())
+  name     String @unique
+  subtopic String?
+  
+  // Representative question for similarity matching
+  representativeQuestion String? @map("representative_question") @db.Text
+  representativeEmbedding Float[]? @map("representative_embedding")
+  
+  // Topic discovery metadata
+  isDiscovered    Boolean  @default(false) @map("is_discovered") // True if discovered via clustering
+  discoveredAt    DateTime? @map("discovered_at")
+  approvalStatus  String   @default("pending") // pending, approved, rejected
+  
+  // Relationships
+  questions       Question[]
+  
+  // Audit fields
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  
+  @@map("topics")
+}
+
+// Analysis runs to track processing history
+model AnalysisRun {
+  id           String   @id @default(cuid())
+  status       String   // queued, running, completed, failed
+  progress     Int      @default(0)
+  message      String?
+  
+  // Parameters
+  mode         String   // sample, all
+  sampleSize   Int?     @map("sample_size")
+  
+  // Results summary
+  totalQuestions       Int?    @map("total_questions")
+  similarQuestions     Int?    @map("similar_questions")
+  newTopicsDiscovered  Int?    @map("new_topics_discovered")
+  
+  // Generated files
+  similarQuestionsFile String? @map("similar_questions_file")
+  newTopicsFile        String? @map("new_topics_file")
+  completeReviewFile   String? @map("complete_review_file")
+  
+  // Error tracking
+  error        String?  @db.Text
+  
+  // Relationships
+  questions    Question[]
+  
+  // Timestamps
+  startedAt    DateTime  @map("started_at")
+  completedAt  DateTime? @map("completed_at")
+  failedAt     DateTime? @map("failed_at")
+  
+  @@map("analysis_runs")
+}
+
+// Configuration settings for the application
+model AppConfig {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String @db.Text
+  
+  // Metadata
+  description String?
+  category    String? // google_sheets, analysis, auth, etc.
+  
+  // Audit fields
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  @@map("app_config")
+}
+
+// Cache for embeddings to avoid re-computation
+model EmbeddingCache {
+  id         String   @id @default(cuid())
+  textHash   String   @unique @map("text_hash") // MD5 hash of the text
+  model      String   // embedding model used
+  embedding  Float[]  // cached embedding
+  
+  // Audit fields
+  createdAt  DateTime @default(now()) @map("created_at")
+  accessedAt DateTime @default(now()) @map("accessed_at")
+  
+  @@map("embedding_cache")
+  @@index([model, textHash])
 }
