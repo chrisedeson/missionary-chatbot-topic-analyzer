@@ -2,8 +2,7 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client-js"
-  output   = "../generated/prisma"
+  provider = "prisma-client-py"
 }
 
 datasource db {
@@ -11,16 +10,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Enable pgvector extension
-generator client_extensions {
-  provider = "prisma-client-extensions"
-}
-
 // Questions table with embedding support
 model Question {
   id          String   @id @default(cuid())
   text        String   @db.Text
-  embedding   Float[]? // pgvector embedding (1536 dimensions for text-embedding-3-small)
+  embedding   Float[] // pgvector embedding (1536 dimensions for text-embedding-3-small)
   
   // Metadata
   date        DateTime?
@@ -56,7 +50,7 @@ model Topic {
   
   // Representative question for similarity matching
   representativeQuestion String? @map("representative_question") @db.Text
-  representativeEmbedding Float[]? @map("representative_embedding")
+  representativeEmbedding Float[] @map("representative_embedding")
   
   // Topic discovery metadata
   isDiscovered    Boolean  @default(false) @map("is_discovered") // True if discovered via clustering

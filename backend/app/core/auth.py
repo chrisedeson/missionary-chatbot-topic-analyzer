@@ -58,3 +58,7 @@ async def get_optional_developer(credentials: Optional[HTTPAuthorizationCredenti
         return await get_current_developer(credentials)
     except HTTPException:
         return None
+
+
+# Alias for backward compatibility and clear naming
+require_developer_auth = get_current_developer

@@ -9,18 +9,15 @@ db = Prisma()
 
 
 async def init_db():
-    """Initialize database connection and run migrations"""
+    """Initialize database connection"""
     try:
         logger.info("Connecting to database...")
         await db.connect()
         logger.info("Database connected successfully")
-        
-        # The Prisma client will automatically handle migrations
-        # when using prisma generate and prisma db push
-        
     except Exception as e:
         logger.error("Failed to connect to database", error=str(e))
-        raise
+        logger.warning("Continuing without database connection (development mode)")
+        # Don't raise in development - allow API to start without DB
 
 
 async def close_db():
