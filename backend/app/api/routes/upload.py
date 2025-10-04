@@ -1,186 +1,226 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
-from typing import List
-import structlog
-import pandas as pd
-import io
-import os
+"""
+Upload API Routes
+
+Handles file uploads and data processing pipeline.
+"""
+
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Depends
+from fastapi.responses import JSONResponse, StreamingResponse
+import uuid
+import logging
+import asyncio
 from pathlib import Path
+from typing import Dict, Any
+import json
+from datetime import datetime
 
-from app.core.database import get_db
-from app.core.auth import get_current_developer
 from app.core.config import settings
+from app.core.auth import get_current_developer
+from app.utils.sse_manager import sse_manager
+from app.services.data_processing import data_processing_service
 
-logger = structlog.get_logger()
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
-# Create upload directory if it doesn't exist
-Path(settings.UPLOAD_DIR).mkdir(exist_ok=True)
+# In-memory storage for upload status (use Redis in production)
+upload_status: Dict[str, Dict] = {}
 
-
-@router.post("/questions")
-async def upload_questions_file(
+@router.post("/upload")
+async def upload_file(
     file: UploadFile = File(...),
-    developer=Depends(get_current_developer),
-    db=Depends(get_db)
+    developer=Depends(get_current_developer)
 ):
-    """Upload and validate questions CSV file (developer only)"""
-    
-    logger.info(
-        "Questions file upload started",
-        filename=file.filename,
-        content_type=file.content_type,
-        developer=developer["role"]
-    )
-    
-    # Validate file type
-    if not file.filename.endswith(('.csv', '.txt')):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File must be CSV or TXT format"
-        )
-    
-    # Validate file size
-    if file.size and file.size > settings.MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File too large. Maximum size: {settings.MAX_FILE_SIZE // (1024*1024)}MB"
-        )
-    
+    """Handle file upload"""
     try:
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="No filename provided")
+        
+        # Validate file type
+        if not file.filename.lower().endswith('.csv'):
+            raise HTTPException(status_code=400, detail="Only CSV files are supported")
+        
+        # Generate unique ID for this upload
+        upload_id = str(uuid.uuid4())
+        
         # Read file content
         content = await file.read()
         
-        # Try to parse as CSV/text
-        if file.filename.endswith('.csv'):
-            # Handle CSV files - could be comma-separated questions or structured data
-            try:
-                df = pd.read_csv(io.StringIO(content.decode('utf-8')))
-                logger.info(f"CSV parsed successfully with {len(df)} rows and columns: {list(df.columns)}")
-            except Exception as csv_error:
-                # If CSV parsing fails, treat as line-by-line questions
-                logger.info("CSV parsing failed, treating as line-by-line questions", error=str(csv_error))
-                lines = content.decode('utf-8').strip().split('\n')
-                questions = [line.strip().rstrip(',') for line in lines if line.strip()]
-                df = pd.DataFrame({'question': questions})
-        else:
-            # Handle TXT files - line by line
-            lines = content.decode('utf-8').strip().split('\n')
-            questions = [line.strip() for line in lines if line.strip()]
-            df = pd.DataFrame({'question': questions})
+        if len(content) == 0:
+            raise HTTPException(status_code=400, detail="File is empty")
         
-        # Basic validation
-        if len(df) == 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="File appears to be empty or contains no valid questions"
-            )
-        
-        # Detect data format and quality issues
-        validation_result = await validate_questions_data(df)
-        
-        # Save file for processing
-        file_path = Path(settings.UPLOAD_DIR) / f"questions_{file.filename}"
-        with open(file_path, 'wb') as f:
-            f.write(content)
-        
-        logger.info(
-            "Questions file upload completed",
-            filename=file.filename,
-            rows_count=len(df),
-            validation_result=validation_result
-        )
-        
-        return {
-            "message": "File uploaded and validated successfully",
+        # Store file info
+        file_info = {
+            "upload_id": upload_id,
             "filename": file.filename,
-            "rows_count": len(df),
-            "validation": validation_result,
-            "file_path": str(file_path)
+            "size": len(content),
+            "status": "uploaded",
+            "content": content,  # In production, store in proper file storage
+            "uploaded_at": datetime.now().isoformat()
         }
         
-    except UnicodeDecodeError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File encoding not supported. Please use UTF-8 encoding."
-        )
+        upload_status[upload_id] = file_info
+        
+        logger.info(f"File uploaded successfully: {file.filename} ({len(content)} bytes)")
+        
+        return JSONResponse({
+            "upload_id": upload_id,
+            "filename": file.filename,
+            "size": len(content),
+            "status": "uploaded"
+        })
+        
     except Exception as e:
-        logger.error("File upload failed", error=str(e), filename=file.filename)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"File processing failed: {str(e)}"
-        )
+        logger.error(f"Upload failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-async def validate_questions_data(df: pd.DataFrame) -> dict:
-    """Validate questions data and detect quality issues"""
-    
-    validation = {
-        "status": "valid",
-        "warnings": [],
-        "errors": [],
-        "stats": {}
-    }
-    
-    # Check for required columns or single question column
-    if 'question' not in df.columns and len(df.columns) == 1:
-        # Single column - assume it's questions
-        df.columns = ['question']
-        validation["warnings"].append("Assumed single column contains questions")
-    elif 'question' not in df.columns:
-        validation["errors"].append("No 'question' column found and multiple columns detected")
-        validation["status"] = "error"
-        return validation
-    
-    # Check for empty questions
-    empty_questions = df['question'].isna().sum() + (df['question'] == '').sum()
-    if empty_questions > 0:
-        validation["warnings"].append(f"Found {empty_questions} empty questions")
-    
-    # Check for "kwargs" error rows (from langfuse errors)
-    kwargs_rows = df['question'].str.contains('kwargs', na=False).sum()
-    if kwargs_rows > 0:
-        validation["warnings"].append(f"Found {kwargs_rows} rows with 'kwargs' - these may be error rows")
-    
-    # Check for very short questions (potential data quality issues)
-    short_questions = (df['question'].str.len() < 5).sum()
-    if short_questions > 0:
-        validation["warnings"].append(f"Found {short_questions} very short questions (<5 characters)")
-    
-    # Check for expected columns in full format
-    expected_cols = ['Date', 'Country', 'User Language', 'State', 'Question']
-    missing_cols = [col for col in expected_cols if col not in df.columns]
-    if missing_cols:
-        validation["warnings"].append(f"Missing columns for full format: {missing_cols}")
-    
-    validation["stats"] = {
-        "total_rows": len(df),
-        "valid_questions": len(df) - empty_questions,
-        "columns": list(df.columns),
-        "sample_questions": df['question'].dropna().head(3).tolist()
-    }
-    
-    return validation
-
-
-@router.get("/uploads")
-async def list_uploaded_files(
+@router.post("/process/{upload_id}")
+async def process_file(
+    upload_id: str, 
+    background_tasks: BackgroundTasks,
     developer=Depends(get_current_developer)
 ):
-    """List uploaded files (developer only)"""
+    """Process uploaded file and extract questions"""
+    try:
+        # Get uploaded file
+        if upload_id not in upload_status:
+            raise HTTPException(status_code=404, detail="Upload not found")
+        
+        file_info = upload_status[upload_id]
+        if file_info["status"] != "uploaded":
+            raise HTTPException(status_code=400, detail="File not ready for processing")
+        
+        # Generate processing ID
+        processing_id = str(uuid.uuid4())
+        
+        # Create progress callback for SSE updates
+        async def progress_callback(proc_id: str, stage: str, progress: int, message: str):
+            """Send progress updates via SSE"""
+            update_data = {
+                "processing_id": proc_id,
+                "stage": stage,
+                "progress": progress,
+                "message": message,
+                "timestamp": datetime.now().isoformat()
+            }
+            await sse_manager.send_to_client(proc_id, json.dumps(update_data))
+        
+        # Start processing in background
+        async def run_processing():
+            try:
+                await data_processing_service.process_questions_file(
+                    file_content=file_info["content"],
+                    filename=file_info["filename"],
+                    processing_id=processing_id,
+                    progress_callback=progress_callback
+                )
+            except Exception as e:
+                logger.error(f"Background processing failed: {e}")
+                await progress_callback(processing_id, "error", 0, f"Processing failed: {str(e)}")
+        
+        # Start background task
+        background_tasks.add_task(run_processing)
+        
+        logger.info(f"Started processing for upload {upload_id} with processing ID {processing_id}")
+        
+        return JSONResponse({
+            "processing_id": processing_id,
+            "upload_id": upload_id,
+            "status": "processing",
+            "message": "Data processing started"
+        })
+        
+    except Exception as e:
+        logger.error(f"Processing failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/status/{processing_id}")
+async def get_processing_status(
+    processing_id: str,
+    developer=Depends(get_current_developer)
+):
+    """Get processing status and results"""
+    status = data_processing_service.get_processing_status(processing_id)
     
-    upload_dir = Path(settings.UPLOAD_DIR)
-    files = []
+    if not status:
+        raise HTTPException(status_code=404, detail="Processing job not found")
     
-    for file_path in upload_dir.glob("*"):
-        if file_path.is_file():
-            stat = file_path.stat()
-            files.append({
-                "filename": file_path.name,
-                "size": stat.st_size,
-                "created": stat.st_ctime,
-                "modified": stat.st_mtime
+    return status
+
+@router.get("/progress/{processing_id}")
+async def get_processing_progress(processing_id: str):
+    """Get real-time processing progress via Server-Sent Events"""
+    
+    # Note: We don't require auth here since processing_id is a UUID
+    # and this is only for progress updates, not sensitive data
+    
+    async def event_stream():
+        """Generate SSE events for processing progress"""
+        client_queue = None
+        try:
+            # Register client for updates
+            client_queue = sse_manager.add_client(processing_id)
+            
+            # Send initial connection event
+            initial_message = json.dumps({
+                'type': 'connected', 
+                'processing_id': processing_id,
+                'timestamp': datetime.now().isoformat()
             })
+            yield f"data: {initial_message}\n\n"
+            
+            # Stream updates with timeout
+            while True:
+                try:
+                    # Wait for message with timeout
+                    message = await asyncio.wait_for(client_queue.get(), timeout=30.0)
+                    yield f"data: {message}\n\n"
+                except asyncio.TimeoutError:
+                    # Send heartbeat to keep connection alive
+                    heartbeat = json.dumps({
+                        'type': 'heartbeat',
+                        'timestamp': datetime.now().isoformat()
+                    })
+                    yield f"data: {heartbeat}\n\n"
+                except asyncio.CancelledError:
+                    logger.info(f"SSE stream cancelled for processing {processing_id}")
+                    break
+                    
+        except Exception as e:
+            logger.error(f"SSE stream error for processing {processing_id}: {e}")
+            error_message = json.dumps({
+                'type': 'error', 
+                'message': f"Stream error: {str(e)}",
+                'timestamp': datetime.now().isoformat()
+            })
+            yield f"data: {error_message}\n\n"
+        finally:
+            if client_queue:
+                sse_manager.remove_client(processing_id, client_queue)
     
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "X-Accel-Buffering": "no"  # Disable nginx buffering
+        }
+    )
+
+@router.get("/history")
+async def get_processing_history(developer=Depends(get_current_developer)):
+    """Get history of all processing jobs"""
     return {
-        "files": sorted(files, key=lambda x: x["modified"], reverse=True)
+        "history": data_processing_service.get_all_processing_history()
+    }
+
+@router.get("/uploads")
+async def get_uploaded_files(developer=Depends(get_current_developer)):
+    """Get list of uploaded files"""
+    return {
+        "uploads": list(upload_status.values())
     }

@@ -138,7 +138,12 @@ class ApiClient {
   }
 
   // Upload endpoints (developer only)
-  async uploadFile(file: File, onProgress?: (progress: number) => void) {
+  async uploadFile(file: File, onProgress?: (progress: number) => void): Promise<{
+    upload_id: string;
+    filename: string;
+    size: number;
+    status: string;
+  }> {
     const formData = new FormData()
     formData.append('file', file)
     
@@ -157,7 +162,7 @@ class ApiClient {
           try {
             resolve(JSON.parse(xhr.responseText))
           } catch {
-            resolve(xhr.responseText)
+            reject(new Error('Invalid response format'))
           }
         } else {
           reject(new Error(`Upload failed: ${xhr.statusText}`))
@@ -168,12 +173,31 @@ class ApiClient {
         reject(new Error('Upload failed'))
       })
       
-      xhr.open('POST', `${this.baseURL}/upload`)
+      xhr.open('POST', `${this.baseURL}/upload/upload`)
       if (this.authToken) {
         xhr.setRequestHeader('Authorization', `Bearer ${this.authToken}`)
       }
       xhr.send(formData)
     })
+  }
+
+  async processFile(uploadId: string): Promise<{
+    processing_id: string;
+    upload_id: string;
+    status: string;
+    message: string;
+  }> {
+    return this.request(`/upload/process/${uploadId}`, {
+      method: 'POST',
+    })
+  }
+
+  async getProcessingStatus(processingId: string) {
+    return this.request(`/upload/status/${processingId}`)
+  }
+
+  async getUploadHistory() {
+    return this.request('/upload/history')
   }
 
   async uploadQuestions(file: File) {

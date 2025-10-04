@@ -21,6 +21,7 @@ export function Dashboard({ isDeveloper }: DashboardProps) {
   const [showUpload, setShowUpload] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<AnalysisRun | null>(null);
+  const [lastProcessingResult, setLastProcessingResult] = useState<any>(null);
 
   // Fetch dashboard data
   const { data: dashboardData, refetch: refetchDashboard, isLoading } = useQuery({
@@ -36,13 +37,19 @@ export function Dashboard({ isDeveloper }: DashboardProps) {
     refetchInterval: 10000, // Refresh every 10 seconds
   });
 
-  const handleUploadSuccess = () => {
+  const handleUploadSuccess = (processingResult: any) => {
     setShowUpload(false);
+    setLastProcessingResult(processingResult);
     refetchDashboard();
   };
 
+  // Check if we have processed questions available for analysis
+  const hasProcessedQuestions = dashboardData?.has_questions || 
+    (lastProcessingResult?.status === "completed" && 
+     lastProcessingResult?.statistics?.valid_questions_extracted > 0);
+
   const handleStartAnalysis = async () => {
-    if (!dashboardData?.has_questions) return;
+    if (!hasProcessedQuestions) return;
     
     try {
       const response = await apiClient.startAnalysis();
@@ -115,7 +122,7 @@ export function Dashboard({ isDeveloper }: DashboardProps) {
               
               <Button
                 onClick={handleStartAnalysis}
-                disabled={!dashboardData?.has_questions || !!runningRun}
+                disabled={!hasProcessedQuestions || !!runningRun}
               >
                 {runningRun ? (
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -182,7 +189,7 @@ export function Dashboard({ isDeveloper }: DashboardProps) {
               </span>
             </div>
 
-            {!isDeveloper && !dashboardData?.has_questions && (
+            {!isDeveloper && !hasProcessedQuestions && (
               <div className="p-3 bg-muted/50 rounded-md">
                 <p className="text-sm text-muted-foreground">
                   No data available. Contact a developer to upload question data.
@@ -212,10 +219,15 @@ export function Dashboard({ isDeveloper }: DashboardProps) {
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex items-center justify-center h-64 text-muted-foreground">
-                {!dashboardData?.has_questions ? (
+                {!hasProcessedQuestions ? (
                   <div className="text-center">
                     <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p>Upload question data to get started</p>
+                    <p>Upload and process question data to get started</p>
+                    {lastProcessingResult && (
+                      <p className="text-sm mt-2 text-blue-600">
+                        Last processing: {lastProcessingResult.statistics?.valid_questions_extracted || 0} questions extracted
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <div className="text-center">

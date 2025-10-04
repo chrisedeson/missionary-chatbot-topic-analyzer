@@ -23,6 +23,15 @@ async def get_dashboard_metrics(
     # For now, return mock data matching the requirements
     
     return {
+        # Match the frontend DashboardData interface
+        "question_count": 0,  # TODO: Get actual count from database
+        "topic_count": 0,     # TODO: Get actual count from database
+        "last_analysis": None,  # TODO: Get from database
+        "last_updated": None,   # TODO: Get from database
+        "coverage_percentage": 0,  # TODO: Calculate from database
+        "has_questions": True,  # Enable analysis button (TODO: check actual questions)
+        
+        # Additional insights for dashboard widgets
         "recent_insights": {
             "peak_question_time": "2-4 PM UTC",
             "most_active_region": "Asia-Pacific",
@@ -40,7 +49,8 @@ async def get_dashboard_metrics(
             "total_questions": 0,
             "total_topics": 0,
             "total_countries": 0,
-            "last_analysis": None
+            "last_analysis": None,
+            "has_questions": True  # Enable analysis button for now (TODO: check actual questions count)
         }
     }
 
