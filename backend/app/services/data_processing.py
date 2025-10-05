@@ -393,45 +393,114 @@ class DataProcessingService:
             if progress_callback:
                 await progress_callback(processing_id, "deduplication", 78, f"Removed {duplicates_removed} duplicates, {len(questions)} unique questions remain")
             
-            # Write to Google Sheets
-            sheets_result = None
-            sheets_error = None
+            # Write to Database (with deduplication)
+            database_result = None
+            database_error = None
             
             if progress_callback:
-                await progress_callback(processing_id, "sheets_update", 80, "Writing to Google Sheets...")
+                await progress_callback(processing_id, "database_write", 80, "Writing to database...")
             
             try:
-                # Write questions to Google Sheets
-                sheets_result = google_sheets_service.write_questions_to_sheet(
+                # Import questions service
+                from app.services.questions import get_questions_service
+                
+                # Write questions to database with deduplication
+                questions_service = await get_questions_service()
+                database_result = await questions_service.create_questions_with_deduplication(
                     questions=questions,
-                    sheet_id=settings.QUESTIONS_SHEET_ID
+                    processing_id=processing_id
                 )
                 
                 if progress_callback:
-                    await progress_callback(processing_id, "sheets_update", 90, f"Successfully wrote {sheets_result['rows_written']} questions to Google Sheets")
-                
-            except ColumnMismatchError as e:
-                sheets_error = {
-                    "type": "column_mismatch",
-                    "message": e.message,
-                    "expected_columns": e.expected_columns,
-                    "found_columns": e.found_columns,
-                    "suggestions": e.suggestions
-                }
-                logger.warning(f"Google Sheets column mismatch: {e.message}")
-                
-                if progress_callback:
-                    await progress_callback(processing_id, "sheets_error", 85, f"Google Sheets column mismatch: {e.message}")
+                    await progress_callback(processing_id, "database_write", 90, f"Successfully wrote {database_result['rows_written']} questions to database")
                 
             except Exception as e:
-                sheets_error = {
-                    "type": "write_error",
+                database_error = {
+                    "type": "database_error",
                     "message": str(e)
                 }
-                logger.error(f"Error writing to Google Sheets: {e}")
+                logger.error(f"Database write failed: {e}")
                 
                 if progress_callback:
-                    await progress_callback(processing_id, "sheets_error", 85, f"Failed to write to Google Sheets: {str(e)}")
+                    await progress_callback(processing_id, "database_error", 85, f"Database write failed: {str(e)}")
+            
+            # Sync to Google Sheets (for reporting)
+            sheets_result = None
+            sheets_error = None
+            
+            if database_result and database_result["rows_written"] > 0:
+                if progress_callback:
+                    await progress_callback(processing_id, "sheets_sync", 95, "Syncing to Google Sheets...")
+                
+                try:
+                    # Sync database to Google Sheets
+                    questions_service = await get_questions_service()
+                    sync_result = await questions_service.sync_to_google_sheets()
+                    
+                    if sync_result["status"] == "success":
+                        sheets_result = {
+                            "rows_written": database_result["rows_written"],
+                            "duplicates_skipped": database_result["duplicates_skipped"],
+                            "total_processed": database_result["total_processed"],
+                            "sync_method": "database_to_sheets"
+                        }
+                        
+                        if progress_callback:
+                            await progress_callback(processing_id, "sheets_sync", 98, f"Successfully synced {sync_result['questions_synced']} questions to Google Sheets")
+                    else:
+                        sheets_error = {
+                            "type": "sync_error",
+                            "message": sync_result["error"]
+                        }
+                        
+                except Exception as e:
+                    sheets_error = {
+                        "type": "sync_error", 
+                        "message": str(e)
+                    }
+                    logger.warning(f"Google Sheets sync failed (non-critical): {e}")
+                    
+                    if progress_callback:
+                        await progress_callback(processing_id, "sheets_error", 96, f"Google Sheets sync failed: {str(e)}")
+            else:
+                # No new data to sync
+                sheets_result = {
+                    "rows_written": 0,
+                    "duplicates_skipped": database_result["duplicates_skipped"] if database_result else 0,
+                    "total_processed": len(questions),
+                    "sync_method": "no_sync_needed"
+                }
+            
+            # Handle case where database failed
+            if database_error:
+                logger.error(f"Database write failed: {database_error['message']}")
+                
+                if progress_callback:
+                    await progress_callback(processing_id, "error", 85, f"Processing failed: {database_error['message']}")
+                
+                # Return error response
+                results = {
+                    "processing_id": processing_id,
+                    "filename": filename,
+                    "status": "failed",
+                    "error": database_error,
+                    "database": {
+                        "write_attempted": True,
+                        "write_successful": False,
+                        "write_result": None,
+                        "write_error": database_error
+                    },
+                    "google_sheets": {
+                        "sync_attempted": False,
+                        "write_successful": False,
+                        "write_result": None,
+                        "write_error": None
+                    },
+                    "completed_at": datetime.now().isoformat()
+                }
+                
+                self.active_processes[processing_id] = results
+                return results
             
             # Always complete processing, even if Google Sheets failed
             if progress_callback:
@@ -457,8 +526,14 @@ class DataProcessingService:
                 "structure_analysis": self._convert_numpy_types(structure),
                 "sample_questions": questions[:5],  # First 5 for preview
                 "errors": cleaning_errors[:10],  # First 10 errors
-                "google_sheets": {
+                "database": {
                     "write_attempted": True,
+                    "write_successful": database_result is not None,
+                    "write_result": database_result,
+                    "write_error": database_error
+                },
+                "google_sheets": {
+                    "sync_attempted": database_result is not None and database_result.get("rows_written", 0) > 0,
                     "write_successful": sheets_result is not None,
                     "write_result": sheets_result,
                     "write_error": sheets_error

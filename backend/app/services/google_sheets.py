@@ -198,7 +198,7 @@ class GoogleSheetsService:
     
     def write_questions_to_sheet(self, questions: List[Dict], sheet_id: str, worksheet_name: str = None) -> Dict[str, Any]:
         """
-        Write processed questions to Google Sheets with column validation
+        Write processed questions to Google Sheets with column validation and deduplication
         
         Args:
             questions: List of question dictionaries with metadata
@@ -206,7 +206,7 @@ class GoogleSheetsService:
             worksheet_name: Optional worksheet name (defaults to first sheet)
         
         Returns:
-            Dict with write results and statistics
+            Dict with write results and statistics including duplicates info
         """
         if not self.client:
             raise Exception("Google Sheets client not initialized")
@@ -237,11 +237,92 @@ class GoogleSheetsService:
             else:
                 worksheet = spreadsheet.sheet1
             
-            # Prepare data for writing
-            rows_to_append = []
+            # Read existing data for deduplication
+            existing_data = []
+            try:
+                existing_rows = worksheet.get_all_records()
+                logger.info(f"Successfully read {len(existing_rows)} existing rows from Google Sheets")
+                
+                # Print first few rows for debugging
+                if existing_rows:
+                    logger.info(f"Sample existing row: {existing_rows[0]}")
+                    logger.info(f"Available columns in existing data: {list(existing_rows[0].keys()) if existing_rows else 'No rows'}")
+                else:
+                    logger.warning("No existing rows found in Google Sheets")
+            except Exception as e:
+                logger.error(f"Error reading existing data from Google Sheets: {e}")
+                existing_rows = []
             
-            for question in questions:
+            logger.info(f"Found {len(existing_rows)} existing rows in Google Sheets for deduplication check")
+            
+            # Create set of existing question signatures for fast lookup
+            existing_signatures = set()
+            existing_questions = set()  # Also track just question text for additional safety
+            
+            for i, row in enumerate(existing_rows):
+                # Create a signature based on question text and timestamp
+                question_text = str(row.get('Question', '')).strip().lower()
+                timestamp = str(row.get('Time Stamp', '')).strip()
+                
+                logger.debug(f"Row {i}: Question='{question_text[:30]}...', Timestamp='{timestamp}'")
+                
+                # Add question text alone for broad duplicate detection
+                if question_text:
+                    existing_questions.add(question_text)
+                    logger.debug(f"Added to existing_questions: '{question_text[:30]}...'")
+                
+                # Add question + timestamp signature for exact duplicate detection
+                if question_text and timestamp:
+                    signature = f"{question_text}|{timestamp}"
+                    existing_signatures.add(signature)
+                    logger.debug(f"Added signature: {signature[:50]}...")
+            
+            logger.info(f"Created {len(existing_signatures)} signatures and {len(existing_questions)} unique questions")
+            logger.info(f"First 3 existing questions: {list(existing_questions)[:3]}")
+            
+            # Prepare data for writing with deduplication
+            rows_to_append = []
+            duplicate_count = 0
+            exact_duplicate_count = 0
+            question_duplicate_count = 0
+            
+            for i, question in enumerate(questions):
                 metadata = question.get('metadata', {})
+                question_text = question.get('extracted_question', '').strip()
+                timestamp = str(metadata.get('date', '')).strip()
+                
+                logger.info(f"Processing question {i+1}/{len(questions)}: '{question_text[:50]}...' with timestamp: '{timestamp}'")
+                
+                # Check for question duplicates (question text only)
+                question_only = question_text.lower() if question_text else ""
+                
+                is_duplicate = False
+                
+                # For now, let's be more aggressive and only check question text
+                # This will prevent any duplicate questions regardless of timestamp
+                if question_only and question_only in existing_questions:
+                    duplicate_count += 1
+                    is_duplicate = True
+                    logger.info(f"DUPLICATE FOUND: '{question_only[:50]}...' already exists in sheet")
+                else:
+                    logger.info(f"NEW QUESTION: '{question_only[:50]}...' not found in existing {len(existing_questions)} questions")
+                
+                # TODO: Re-enable timestamp checking later
+                # Priority 1: Check exact signature match (question + timestamp)
+                # if exact_signature and exact_signature in existing_signatures:
+                #     exact_duplicate_count += 1
+                #     is_duplicate = True
+                #     logger.debug(f"Exact duplicate found: {exact_signature[:50]}...")
+                
+                # Priority 2: Check question-only match (for safety, even if timestamp differs)
+                # elif question_only and question_only in existing_questions:
+                #     question_duplicate_count += 1
+                #     is_duplicate = True
+                #     logger.debug(f"Question duplicate found: {question_only[:50]}...")
+                
+                if is_duplicate:
+                    continue
+                
                 row_data = []
                 
                 # Map data to columns in the order they appear in the sheet
@@ -249,7 +330,7 @@ class GoogleSheetsService:
                     expected_col = column_mapping.get(sheet_col)
                     
                     if expected_col == 'Time Stamp':
-                        row_data.append(str(metadata.get('date', '')))
+                        row_data.append(timestamp)
                     elif expected_col == 'Country':
                         row_data.append(str(metadata.get('country', '')))
                     elif expected_col == 'User Language':
@@ -257,20 +338,25 @@ class GoogleSheetsService:
                     elif expected_col == 'State':
                         row_data.append(str(metadata.get('state', '')))
                     elif expected_col == 'Question':
-                        row_data.append(question.get('extracted_question', ''))
+                        row_data.append(question_text)
                     else:
                         row_data.append('')  # Empty for unmapped columns
                 
                 rows_to_append.append(row_data)
             
-            # Append data to sheet
+            # Append only new unique data to sheet
             if rows_to_append:
                 worksheet.append_rows(rows_to_append)
-                logger.info(f"Successfully wrote {len(rows_to_append)} questions to Google Sheets")
+                logger.info(f"Successfully wrote {len(rows_to_append)} new questions to Google Sheets, skipped {duplicate_count} duplicates")
+            else:
+                logger.info(f"No new questions to write - all {duplicate_count} were duplicates")
             
             return {
                 "status": "success",
                 "rows_written": len(rows_to_append),
+                "duplicates_skipped": duplicate_count,
+                "total_processed": len(questions),
+                "existing_rows_count": len(existing_rows),
                 "sheet_id": sheet_id,
                 "worksheet_name": worksheet.title,
                 "column_mapping": column_mapping
@@ -302,6 +388,85 @@ class GoogleSheetsService:
             logger.error(f"Error writing to Google Sheets: {error_message}")
             raise Exception(f"Failed to write to Google Sheets: {error_message}")
     
+    def clear_and_write_questions(self, questions: List[Dict], sheet_id: str, worksheet_name: str = None) -> Dict[str, Any]:
+        """
+        Clear Google Sheets completely and write all questions fresh from database.
+        Simple approach without deduplication complexity.
+        
+        Args:
+            questions: List of question dictionaries with simple structure
+            sheet_id: Google Sheets ID
+            worksheet_name: Optional worksheet name (defaults to first sheet)
+        
+        Returns:
+            Dict with write results
+        """
+        if not self.client:
+            raise Exception("Google Sheets client not initialized")
+        
+        try:
+            # Open the spreadsheet
+            spreadsheet = self.client.open_by_key(sheet_id)
+            
+            if worksheet_name:
+                try:
+                    worksheet = spreadsheet.worksheet(worksheet_name)
+                except WorksheetNotFound:
+                    logger.warning(f"Worksheet '{worksheet_name}' not found, using first sheet")
+                    worksheet = spreadsheet.sheet1
+            else:
+                worksheet = spreadsheet.sheet1
+            
+            # Clear the entire sheet
+            worksheet.clear()
+            
+            # Set up headers
+            headers = ['Time Stamp', 'Country', 'User Language', 'State', 'Question']
+            
+            # Prepare data rows
+            rows_to_write = [headers]  # Start with headers
+            
+            for question in questions:
+                row_data = [
+                    question.get('date', ''),  # Time Stamp
+                    question.get('country', ''),  # Country
+                    question.get('language', ''),  # User Language
+                    question.get('state', ''),  # State
+                    question.get('extracted_question', '')  # Question
+                ]
+                rows_to_write.append(row_data)
+            
+            # Write all data at once (headers + data)
+            if rows_to_write:
+                worksheet.update('A1', rows_to_write)
+                logger.info(f"Successfully cleared and wrote {len(questions)} questions to Google Sheets")
+            
+            return {
+                "status": "success",
+                "rows_written": len(questions),
+                "sheet_cleared": True,
+                "sheet_id": sheet_id,
+                "worksheet_name": worksheet.title
+            }
+            
+        except Exception as e:
+            error_message = str(e)
+            
+            # Provide helpful error messages
+            if "403" in error_message and "permission" in error_message.lower():
+                error_message = (
+                    "Google Sheets access denied. Please ensure the service account "
+                    f"({settings.GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL}) has been granted "
+                    "Editor access to the Google Sheet."
+                )
+            elif "404" in error_message:
+                error_message = f"Google Sheet not found (ID: {sheet_id[:20]}...)"
+            elif "401" in error_message:
+                error_message = "Google Sheets authentication failed."
+            
+            logger.error(f"Error clearing and writing to Google Sheets: {error_message}")
+            raise Exception(f"Failed to clear and write to Google Sheets: {error_message}")
+
     def read_questions_from_sheet(self, sheet_id: str, worksheet_name: str = None) -> pd.DataFrame:
         """
         Read questions from Google Sheets and return as DataFrame

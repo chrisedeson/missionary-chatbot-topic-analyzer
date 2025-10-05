@@ -15,26 +15,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Missionary Questions Analysis",
-  description: "Analytics dashboard for student chatbot questions",
+  description: "Analytics dashboard for missionary chatbot questions",
 };
-
-function QueryProviders({ children }: { children: React.ReactNode }) {
-  const [queryClient] = useState(() => new QueryClient({
-    defaultOptions: {
-      queries: {
-        staleTime: 5 * 60 * 1000, // 5 minutes
-        retry: 1,
-      },
-    },
-  }));
-
-  return (
-    <QueryClientProvider client={queryClient}>
-      {children}
-      <ReactQueryDevtools initialIsOpen={false} />
-    </QueryClientProvider>
-  );
-}
 
 export default function RootLayout({
   children,

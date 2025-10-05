@@ -391,6 +391,63 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
                 <p className="text-sm text-muted-foreground">
                   {processingResult?.statistics?.valid_questions_extracted || 0} questions extracted
                 </p>
+                
+                {/* Database Status */}
+                {processingResult?.database && (
+                  <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg">
+                    <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 mb-2">
+                      <Database className="w-4 h-4" />
+                      <span className="font-medium text-sm">Database Status</span>
+                    </div>
+                    {processingResult.database.write_successful ? (
+                      <div className="text-xs">
+                        {processingResult.database.write_result?.rows_written > 0 ? (
+                          <div className="text-blue-600 dark:text-blue-400">
+                            <p className="font-medium mb-1">✅ Database Write Successful</p>
+                            <div className="space-y-1">
+                              <p>� {processingResult.database.write_result?.rows_written || 0} new questions saved</p>
+                              {processingResult.database.write_result?.duplicates_skipped > 0 && (
+                                <p>🔄 {processingResult.database.write_result.duplicates_skipped} duplicates skipped</p>
+                              )}
+                              <p>📊 {processingResult.database.write_result?.total_processed || 0} total questions processed</p>
+                            </div>
+                            {processingResult.database.write_result?.duplicates_skipped > 0 && (
+                              <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded">
+                                <p className="text-blue-700 dark:text-blue-300 text-xs">
+                                  💡 Database deduplication prevents exact duplicate questions from being stored.
+                                  This ensures data integrity and prevents redundant analysis.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-yellow-600 dark:text-yellow-400">
+                            <p className="font-medium mb-1">🔄 All Questions Were Duplicates</p>
+                            <div className="space-y-1">
+                              <p>🔄 {processingResult.database.write_result?.duplicates_skipped || 0} duplicates skipped</p>
+                              <p>📊 {processingResult.database.write_result?.total_processed || 0} total questions processed</p>
+                            </div>
+                            <div className="mt-2 p-2 bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800 rounded">
+                              <p className="text-yellow-700 dark:text-yellow-300 text-xs">
+                                💡 No new questions were added because all questions from this file 
+                                already exist in the database.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-red-600 dark:text-red-400">
+                        <p className="mb-2">❌ Database write failed:</p>
+                        <div className="bg-red-50 dark:bg-red-950/30 p-2 rounded border">
+                          <p className="text-xs">{processingResult.database.write_error?.message}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Google Sheets Status */}
                 {processingResult?.google_sheets && (
                   <div className="mt-3 p-3 bg-green-50 dark:bg-green-950/20 rounded-lg">
                     <div className="flex items-center gap-2 text-green-700 dark:text-green-300 mb-2">
@@ -398,9 +455,22 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
                       <span className="font-medium text-sm">Google Sheets Status</span>
                     </div>
                     {processingResult.google_sheets.write_successful ? (
-                      <p className="text-xs text-green-600 dark:text-green-400">
-                        ✅ Successfully wrote {processingResult.google_sheets.write_result?.rows_written || 0} questions to Google Sheets
-                      </p>
+                      <div className="text-xs text-green-600 dark:text-green-400">
+                        <p className="font-medium mb-1">✅ Google Sheets Sync Successful</p>
+                        <div className="space-y-1">
+                          <p>📋 Synced from database to reporting sheet</p>
+                          <p>📊 {processingResult.google_sheets.write_result?.total_processed || 0} questions in sync</p>
+                          {processingResult.google_sheets.write_result?.sync_method && (
+                            <p>🔄 Method: {processingResult.google_sheets.write_result.sync_method}</p>
+                          )}
+                        </div>
+                        <div className="mt-2 p-2 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded">
+                          <p className="text-green-700 dark:text-green-300 text-xs">
+                            💡 Google Sheets is now used for reporting. All data is stored in the database first,
+                            then synced to sheets for easy viewing and sharing.
+                          </p>
+                        </div>
+                      </div>
                     ) : processingResult.google_sheets.write_error?.type === "column_mismatch" ? (
                       <div className="text-xs text-orange-600 dark:text-orange-400">
                         <p className="font-medium mb-1">⚠️ Column Mismatch in Google Sheets</p>
