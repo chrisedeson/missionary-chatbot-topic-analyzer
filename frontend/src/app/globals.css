@@ -148,3 +148,41 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+/* Custom slim dark-mode scrollbar */
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  .scrollbar-track-gray-100::-webkit-scrollbar-track {
+    background: rgb(243 244 246);
+  }
+  
+  .dark .scrollbar-track-gray-800::-webkit-scrollbar-track {
+    background: rgb(31 41 55);
+  }
+  
+  .scrollbar-thumb-gray-300::-webkit-scrollbar-thumb {
+    background: rgb(209 213 219);
+    border-radius: 3px;
+  }
+  
+  .dark .scrollbar-thumb-gray-600::-webkit-scrollbar-thumb {
+    background: rgb(75 85 99);
+    border-radius: 3px;
+  }
+  
+  .scrollbar-thumb-gray-300::-webkit-scrollbar-thumb:hover {
+    background: rgb(156 163 175);
+  }
+  
+  .dark .scrollbar-thumb-gray-600::-webkit-scrollbar-thumb:hover {
+    background: rgb(107 114 128);
+  }
+}

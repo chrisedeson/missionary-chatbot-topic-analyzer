@@ -348,7 +348,7 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
 
   return (
     <Sheet open={open} onOpenChange={onClose}>
-      <SheetContent className="w-full sm:max-w-lg">
+      <SheetContent className="w-full sm:max-w-lg flex flex-col">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <Upload className="w-5 h-5" />
@@ -359,7 +359,8 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
           </SheetDescription>
         </SheetHeader>
 
-        <div className="mt-6 space-y-6">
+        {/* Scrollable content container with slim dark-mode scrollbar */}
+        <div className="flex-1 overflow-y-auto pr-2 mt-6 space-y-6 scrollbar-thin scrollbar-track-gray-100 dark:scrollbar-track-gray-800 scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
           {/* File Drop Zone */}
           <div
             className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
@@ -409,13 +410,21 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
                               {processingResult.database.write_result?.duplicates_skipped > 0 && (
                                 <p>🔄 {processingResult.database.write_result.duplicates_skipped} duplicates skipped</p>
                               )}
+                              {processingResult.database.write_result?.data_errors_skipped > 0 && (
+                                <p>⚠️ {processingResult.database.write_result.data_errors_skipped} rows with data errors skipped</p>
+                              )}
+                              {processingResult.database.write_result?.insertion_errors > 0 && (
+                                <p>❌ {processingResult.database.write_result.insertion_errors} database insertion errors</p>
+                              )}
                               <p>📊 {processingResult.database.write_result?.total_processed || 0} total questions processed</p>
                             </div>
-                            {processingResult.database.write_result?.duplicates_skipped > 0 && (
+                            {(processingResult.database.write_result?.duplicates_skipped > 0 || 
+                              processingResult.database.write_result?.data_errors_skipped > 0 || 
+                              processingResult.database.write_result?.insertion_errors > 0) && (
                               <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded">
                                 <p className="text-blue-700 dark:text-blue-300 text-xs">
-                                  💡 Database deduplication prevents exact duplicate questions from being stored.
-                                  This ensures data integrity and prevents redundant analysis.
+                                  💡 Rows skipped due to: duplicates (prevent redundant data), data errors (missing/invalid fields), or database constraints.
+                                  Only valid, unique questions are stored for analysis.
                                 </p>
                               </div>
                             )}
@@ -456,73 +465,19 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
                     </div>
                     {processingResult.google_sheets.write_successful ? (
                       <div className="text-xs text-green-600 dark:text-green-400">
-                        <p className="font-medium mb-1">✅ Google Sheets Sync Successful</p>
-                        <div className="space-y-1">
-                          <p>📋 Synced from database to reporting sheet</p>
-                          <p>📊 {processingResult.google_sheets.write_result?.total_processed || 0} questions in sync</p>
-                          {processingResult.google_sheets.write_result?.sync_method && (
-                            <p>🔄 Method: {processingResult.google_sheets.write_result.sync_method}</p>
-                          )}
-                        </div>
-                        <div className="mt-2 p-2 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded">
-                          <p className="text-green-700 dark:text-green-300 text-xs">
-                            💡 Google Sheets is now used for reporting. All data is stored in the database first,
-                            then synced to sheets for easy viewing and sharing.
-                          </p>
-                        </div>
-                      </div>
-                    ) : processingResult.google_sheets.write_error?.type === "column_mismatch" ? (
-                      <div className="text-xs text-orange-600 dark:text-orange-400">
-                        <p className="font-medium mb-1">⚠️ Column Mismatch in Google Sheets</p>
-                        <p className="mb-2">{processingResult.google_sheets.write_error.message}</p>
-                        <div className="bg-orange-50 dark:bg-orange-950/30 p-2 rounded border">
-                          <p className="font-medium mb-1">Expected columns:</p>
-                          <p className="font-mono text-xs">{processingResult.google_sheets.write_error.expected_columns?.join(", ")}</p>
-                          <p className="font-medium mb-1 mt-2">Found columns:</p>
-                          <p className="font-mono text-xs">{processingResult.google_sheets.write_error.found_columns?.join(", ")}</p>
-                          {processingResult.google_sheets.write_error.suggestions && Object.keys(processingResult.google_sheets.write_error.suggestions).length > 0 && (
-                            <>
-                              <p className="font-medium mb-1 mt-2">Suggestions:</p>
-                              <ul className="text-xs">
-                                {Object.entries(processingResult.google_sheets.write_error.suggestions).map(([found, suggested]) => (
-                                  <li key={found} className="font-mono">
-                                    "{found}" → "{String(suggested)}"
-                                  </li>
-                                ))}
-                              </ul>
-                            </>
-                          )}
-                          <p className="text-xs mt-2 text-orange-700 dark:text-orange-300">
-                            Please update the Google Sheets column names to match the expected format, then try uploading again.
-                          </p>
-                        </div>
-                      </div>
-                    ) : processingResult.google_sheets.write_error ? (
-                      <div className="text-xs text-red-600 dark:text-red-400">
-                        <p className="mb-2">❌ Failed to write to Google Sheets:</p>
-                        <div className="bg-red-50 dark:bg-red-950/30 p-2 rounded border">
-                          <p className="text-xs">{processingResult.google_sheets.write_error.message}</p>
-                          {processingResult.google_sheets.write_error.message.includes("permission") && (
-                            <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded">
-                              <p className="text-blue-700 dark:text-blue-300 text-xs font-medium mb-1">💡 How to fix:</p>
-                              <ol className="text-blue-600 dark:text-blue-400 text-xs space-y-1">
-                                <li>1. Open your Google Sheet</li>
-                                <li>2. Click "Share" button</li>
-                                <li>3. Add: streamlit-sheets-reader@byu-pathway-chatbot.iam.gserviceaccount.com</li>
-                                <li>4. Set permission to "Editor"</li>
-                                <li>5. Try uploading again</li>
-                              </ol>
-                            </div>
-                          )}
-                        </div>
+                        <p className="font-medium">✅ Google Sheets sync completed</p>
                       </div>
                     ) : (
-                      <p className="text-xs text-gray-600 dark:text-gray-400">
-                        ℹ️ No Google Sheets write attempted
-                      </p>
+                      <div className="text-xs text-red-600 dark:text-red-400">
+                        <p className="font-medium">❌ Google Sheets sync failed</p>
+                        <div className="bg-red-50 dark:bg-red-950/30 p-2 rounded border mt-1">
+                          <p className="text-xs">{processingResult.google_sheets.write_error?.message}</p>
+                        </div>
+                      </div>
                     )}
                   </div>
                 )}
+
               </div>
             ) : status === "error" ? (
               <div className="text-red-600">
@@ -605,34 +560,61 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
 
           {/* Action Buttons */}
           <div className="flex gap-3">
-            <Button
-              onClick={handleUpload}
-              disabled={!file || !isValidFile(file) || status === "uploading" || status === "processing"}
-              className="flex-1"
-            >
-              {status === "uploading" ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Uploading...
-                </>
-              ) : status === "processing" ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Processing...
-                </>
-              ) : (
-                <>
-                  <Upload className="w-4 h-4 mr-2" />
-                  Upload & Process
-                </>
-              )}
-            </Button>
-
-            {file && status !== "uploading" && status !== "processing" && (
-              <Button variant="outline" onClick={handleReset}>
+            {status === "completed" ? (
+              // Success state: Only show Clear button
+              <Button variant="outline" onClick={handleReset} className="flex-1">
                 <X className="w-4 h-4 mr-2" />
-                Clear
+                Close & Clear
               </Button>
+            ) : status === "error" ? (
+              // Error state: Show both retry and clear buttons
+              <>
+                <Button
+                  onClick={handleUpload}
+                  disabled={!file || !isValidFile(file)}
+                  className="flex-1"
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  Retry Upload
+                </Button>
+                <Button variant="outline" onClick={handleReset}>
+                  <X className="w-4 h-4 mr-2" />
+                  Clear
+                </Button>
+              </>
+            ) : (
+              // Default state: Show upload and optional clear buttons
+              <>
+                <Button
+                  onClick={handleUpload}
+                  disabled={!file || !isValidFile(file) || status === "uploading" || status === "processing"}
+                  className="flex-1"
+                >
+                  {status === "uploading" ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Uploading...
+                    </>
+                  ) : status === "processing" ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4 mr-2" />
+                      Upload & Process
+                    </>
+                  )}
+                </Button>
+
+                {file && status !== "uploading" && status !== "processing" && (
+                  <Button variant="outline" onClick={handleReset}>
+                    <X className="w-4 h-4 mr-2" />
+                    Clear
+                  </Button>
+                )}
+              </>
             )}
           </div>
         </div>

@@ -39,54 +39,67 @@ class QuestionsService:
             total_processed = len(questions)
             new_questions = []
             duplicates_skipped = 0
+            data_errors_skipped = 0  # Track data validation errors
             
             logger.info(f"Processing {total_processed} questions for deduplication")
             
             # Process each question
             for i, question_data in enumerate(questions):
-                question_text = question_data.get('extracted_question', '').strip()
-                metadata = question_data.get('metadata', {})
-                
-                if not question_text:
-                    logger.warning(f"Skipping empty question at index {i}")
+                try:
+                    question_text = question_data.get('extracted_question', '').strip()
+                    metadata = question_data.get('metadata', {})
+                    
+                    # Skip if no question text
+                    if not question_text:
+                        logger.warning(f"Skipping empty question at index {i}")
+                        data_errors_skipped += 1
+                        continue
+                    
+                    # Parse metadata with error handling
+                    date_obj = None
+                    date_str = metadata.get('date', '')
+                    if date_str and date_str.strip():
+                        try:
+                            # Try to parse the date string
+                            date_obj = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                        except (ValueError, AttributeError) as e:
+                            logger.warning(f"Could not parse date '{date_str}' for question {i}: {e}")
+                            # Continue processing without date instead of skipping entire row
+                            date_obj = None
+                    
+                    # Check for duplicate (same question text)
+                    existing_question = await self.db.question.find_first(
+                        where={'text': question_text}
+                    )
+                    
+                    if existing_question:
+                        duplicates_skipped += 1
+                        logger.debug(f"Duplicate question found: {question_text[:50]}...")
+                        continue
+                    
+                    # Create new question record with safe defaults
+                    question_record = {
+                        'text': question_text,
+                        'date': date_obj,  # Can be None
+                        'country': metadata.get('country') or None,  # Convert empty strings to None
+                        'state': metadata.get('state') or None,
+                        'userLanguage': metadata.get('language') or None,
+                        # embedding will be populated later during analysis
+                        'embedding': [],
+                    }
+                    
+                    new_questions.append(question_record)
+                    logger.debug(f"New question added: {question_text[:50]}...")
+                    
+                except Exception as e:
+                    # Handle any other data processing errors for individual questions
+                    logger.error(f"Error processing question at index {i}: {e}")
+                    data_errors_skipped += 1
                     continue
-                
-                # Parse metadata
-                date_str = metadata.get('date', '')
-                date_obj = None
-                if date_str:
-                    try:
-                        # Try to parse the date string
-                        date_obj = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-                    except (ValueError, AttributeError):
-                        logger.warning(f"Could not parse date: {date_str}")
-                
-                # Check for duplicate (same question text)
-                existing_question = await self.db.question.find_first(
-                    where={'text': question_text}
-                )
-                
-                if existing_question:
-                    duplicates_skipped += 1
-                    logger.debug(f"Duplicate question found: {question_text[:50]}...")
-                    continue
-                
-                # Create new question record
-                question_record = {
-                    'text': question_text,
-                    'date': date_obj,
-                    'country': metadata.get('country'),
-                    'state': metadata.get('state'),
-                    'userLanguage': metadata.get('language'),
-                    # embedding will be populated later during analysis
-                    'embedding': [],
-                }
-                
-                new_questions.append(question_record)
-                logger.debug(f"New question added: {question_text[:50]}...")
             
             # Batch insert new questions
             inserted_questions = []
+            insertion_errors = 0
             if new_questions:
                 logger.info(f"Inserting {len(new_questions)} new questions into database")
                 
@@ -97,16 +110,18 @@ class QuestionsService:
                         inserted_questions.append(question)
                     except Exception as e:
                         logger.error(f"Failed to insert question: {e}")
-                        duplicates_skipped += 1
+                        insertion_errors += 1
             
             rows_written = len(inserted_questions)
             
-            logger.info(f"Successfully inserted {rows_written} questions, skipped {duplicates_skipped} duplicates")
+            logger.info(f"Successfully inserted {rows_written} questions, skipped {duplicates_skipped} duplicates, {data_errors_skipped} data errors, {insertion_errors} insertion errors")
             
             return {
                 "status": "success",
                 "rows_written": rows_written,
                 "duplicates_skipped": duplicates_skipped,
+                "data_errors_skipped": data_errors_skipped,
+                "insertion_errors": insertion_errors,
                 "total_processed": total_processed,
                 "processing_id": processing_id,
                 "inserted_questions": inserted_questions
