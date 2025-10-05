@@ -38,7 +38,6 @@ export function Dashboard({ isDeveloper }: DashboardProps) {
   });
 
   const handleUploadSuccess = (processingResult: any) => {
-    setShowUpload(false);
     setLastProcessingResult(processingResult);
     refetchDashboard();
   };
