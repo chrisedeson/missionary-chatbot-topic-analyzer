@@ -128,10 +128,11 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
 
       // Step 3: Listen for real-time progress (add small delay)
       setTimeout(() => {
-        const authToken = localStorage.getItem('dev_auth_token');
-        const sseUrl = `${process.env.NEXT_PUBLIC_API_URL}/upload/progress/${processResponse.processing_id}`;
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+        const sseUrl = `${apiUrl}/upload/progress/${processResponse.processing_id}`;
         
         console.log("Connecting to SSE:", sseUrl);
+        console.log("API URL:", apiUrl);
         
         const source = new EventSource(sseUrl);
         setEventSource(source);

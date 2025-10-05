@@ -79,11 +79,19 @@ class DataProcessingService:
         # Remove extra whitespace
         text = re.sub(r'\s+', ' ', text.strip())
         
-        # Remove common noise
-        text = re.sub(r'^(Question:\s*|Q:\s*|\d+\.\s*)', '', text, flags=re.IGNORECASE)
+        # Skip empty strings after cleaning
+        if not text:
+            return None
         
-        # Must be at least 3 characters and not just numbers/symbols
-        if len(text) < 3 or re.match(r'^[\d\s\-_.,;:!?]*$', text):
+        try:
+            # Remove common noise
+            text = re.sub(r'^(Question:\s*|Q:\s*|\d+\.\s*)', '', text, flags=re.IGNORECASE)
+            
+            # Must be at least 3 characters and not just numbers/symbols
+            if len(text) < 3 or re.match(r'^[\d\s\-_.,;:!?]*$', text):
+                return None
+        except Exception as e:
+            logger.warning(f"Regex error in clean_question_text: {e}, text: '{text}'")
             return None
         
         return text
@@ -119,8 +127,13 @@ class DataProcessingService:
             col_name = str(col).lower()
             sample_data = df[col].astype(str).str[:100]  # First 100 chars of each cell
             
-            # Count kwargs-like content
-            kwargs_count = sample_data.str.contains(r'[{\[].*content.*[}\]]', regex=True, na=False).sum()
+            # Count kwargs-like content with error handling
+            try:
+                kwargs_count = sample_data.str.contains(r'[{\[].*content.*[}\]]', regex=True, na=False).sum()
+            except Exception as e:
+                logger.warning(f"Error counting kwargs in column {i}: {e}")
+                kwargs_count = 0
+            
             structure["kwargs_rows"] += kwargs_count
             
             # Look for question-like content
@@ -130,8 +143,12 @@ class DataProcessingService:
             ]
             
             question_score = 0
-            for indicator in question_indicators:
-                question_score += sample_data.str.contains(indicator, case=False, na=False).sum()
+            try:
+                for indicator in question_indicators:
+                    question_score += sample_data.str.contains(indicator, case=False, na=False).sum()
+            except Exception as e:
+                logger.warning(f"Error scoring questions in column {i}: {e}")
+                question_score = 0
             
             if (col_name in ['question', 'questions'] or 
                 question_score > len(df) * 0.1 or  # 10% contain question words
