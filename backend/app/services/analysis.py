@@ -379,15 +379,19 @@ class AnalysisService:
                     # Return topics from this specific run based on reference structure
                     topics = []
                     for topic_data in run_data['results']['new_topics']['topics']:
+                        # Convert numpy types to native Python types for JSON serialization
+                        cluster_id = int(topic_data['cluster_id']) if hasattr(topic_data['cluster_id'], 'item') else topic_data['cluster_id']
+                        question_count = int(topic_data['question_count']) if hasattr(topic_data['question_count'], 'item') else topic_data['question_count']
+                        
                         topics.append({
-                            'id': f"topic-{topic_data['cluster_id']}",
+                            'id': f"topic-{cluster_id}",
                             'name': topic_data['topic_name'],
                             'description': f"Topic discovered through clustering analysis",
-                            'question_count': topic_data['question_count'],
+                            'question_count': question_count,
                             'confidence_score': 0.85,  # Default confidence
                             'keywords': [],  # Would extract from topic data
                             'representative_questions': [topic_data['representative_question']],
-                            'cluster_id': topic_data['cluster_id']
+                            'cluster_id': cluster_id
                         })
                     return topics
             

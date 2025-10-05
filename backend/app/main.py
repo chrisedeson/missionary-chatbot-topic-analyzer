@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 import structlog
 
 from app.core.config import settings
-from app.core.database import init_db
+from app.core.database import init_db, health_check
 from app.api.routes import auth, dashboard, upload, analysis, sheets
 
 # Configure structured logging
@@ -92,8 +92,24 @@ async def root():
 
 
 @app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
+async def health_check_endpoint():
+    """Health check endpoint with database status"""
+    try:
+        db_health = await health_check()
+        return {
+            "status": "healthy",
+            "database": db_health,
+            "environment": {
+                "database_url_configured": bool(settings.DATABASE_URL),
+                "debug": settings.DEBUG
+            }
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy", 
+            "error": str(e),
+            "database": {"status": "error", "message": str(e)}
+        }
 
 
 if __name__ == "__main__":
