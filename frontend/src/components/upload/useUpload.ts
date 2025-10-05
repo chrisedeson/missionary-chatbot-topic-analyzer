@@ -139,18 +139,24 @@ export function useUpload(onSuccess: (result: ProcessingResult) => void) {
 
         // Set a timeout to prevent infinite loading (30 seconds)
         const timeout = setTimeout(() => {
-          if (state.status === "processing") {
-            updateState({
-              status: "completed",
-              processingProgress: {
-                stage: "completion",
-                progress: 100,
-                message: "Processing completed (timed out waiting for updates)"
-              }
-            });
-            source.close();
-            onSuccess({ status: "completed" } as ProcessingResult);
-          }
+          setState(currentState => {
+            if (currentState.status === "processing") {
+              source.close();
+              onSuccess({ status: "completed" } as ProcessingResult);
+              return {
+                ...currentState,
+                status: "completed" as UploadStatus,
+                processingProgress: {
+                  stage: "completion",
+                  progress: 100,
+                  message: "Processing completed (timed out waiting for updates)"
+                },
+                eventSource: null,
+                processingTimeout: null
+              };
+            }
+            return currentState;
+          });
         }, 30000);
         updateState({ processingTimeout: timeout });
 
@@ -163,11 +169,18 @@ export function useUpload(onSuccess: (result: ProcessingResult) => void) {
             }
 
             if (data.type === "error") {
+              // Clear timeout and close source immediately on error
+              if (timeout) {
+                clearTimeout(timeout);
+              }
+              source.close();
+              
               updateState({
                 status: "error",
-                error: data.message
+                error: data.message,
+                eventSource: null,
+                processingTimeout: null
               });
-              source.close();
               return;
             }
 
@@ -182,12 +195,17 @@ export function useUpload(onSuccess: (result: ProcessingResult) => void) {
 
             // Check if completed
             if (data.stage === "completion" && data.progress === 100) {
-              updateState({ status: "completed" });
-              source.close();
-              if (state.processingTimeout) {
-                clearTimeout(state.processingTimeout);
-                updateState({ processingTimeout: null });
+              // Clear timeout and close source
+              if (timeout) {
+                clearTimeout(timeout);
               }
+              source.close();
+              
+              updateState({ 
+                status: "completed",
+                eventSource: null,
+                processingTimeout: null
+              });
               
               // Get final results
               setTimeout(async () => {
@@ -214,7 +232,8 @@ export function useUpload(onSuccess: (result: ProcessingResult) => void) {
             if (source.readyState === EventSource.CLOSED) {
               updateState({
                 status: "error",
-                error: "Connection lost during processing. Please check your network connection."
+                error: "Connection lost during processing. Please check your network connection.",
+                eventSource: null
               });
               source.close();
             }

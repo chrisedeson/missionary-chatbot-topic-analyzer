@@ -69,7 +69,24 @@ export function FileDropZone({
         <div className="text-red-600">
           <AlertCircle className="w-12 h-12 mx-auto mb-4" />
           <p className="font-medium">Processing Failed</p>
-          <p className="text-sm text-muted-foreground">{error}</p>
+          <div className="text-sm text-muted-foreground text-left max-w-md">
+            {error.includes("missing required column headers") ? (
+              <div className="space-y-2">
+                <p className="font-medium text-red-600 text-center">❌ Missing Required Columns</p>
+                <div className="bg-red-50 dark:bg-red-950/30 p-3 rounded border border-red-200 dark:border-red-800">
+                  <pre className="whitespace-pre-wrap text-xs font-mono">
+                    {error}
+                  </pre>
+                </div>
+                <div className="text-xs text-center">
+                  <p>💡 <strong>Expected CSV format:</strong></p>
+                  <p>date, country, language, state, question</p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-center">{error}</p>
+            )}
+          </div>
         </div>
       ) : file ? (
         <div>

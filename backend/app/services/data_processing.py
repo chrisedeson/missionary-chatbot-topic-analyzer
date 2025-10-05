@@ -26,6 +26,15 @@ logger = logging.getLogger(__name__)
 class DataProcessingService:
     """Service for processing uploaded questions files"""
     
+    # Required column headers (case-insensitive)
+    REQUIRED_COLUMNS = {
+        'date': ['date', 'timestamp', 'time'],
+        'country': ['country', 'nation'],
+        'language': ['language', 'lang'],
+        'state': ['state', 'province', 'region'],
+        'question': ['question', 'questions', 'kwargs']
+    }
+    
     def __init__(self):
         self.active_processes: Dict[str, Dict] = {}
     
@@ -259,6 +268,68 @@ class DataProcessingService:
         
         return structure, df
     
+    def validate_required_columns(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Validate that all required column headers are present in the CSV.
+        
+        Returns:
+            Dict with validation results including missing/found columns
+        """
+        # Get column names as lowercase strings
+        csv_columns = [str(col).lower().strip() for col in df.columns]
+        
+        validation_result = {
+            "is_valid": True,
+            "found_columns": {},
+            "missing_columns": [],
+            "csv_columns": list(df.columns),  # Original column names
+            "csv_columns_lower": csv_columns,  # Lowercase for comparison
+            "total_columns_found": len(csv_columns),
+            "total_columns_required": len(self.REQUIRED_COLUMNS)
+        }
+        
+        # Check each required column type
+        for required_type, possible_names in self.REQUIRED_COLUMNS.items():
+            found = False
+            matched_column = None
+            
+            # Look for any of the possible names for this column type
+            for possible_name in possible_names:
+                for idx, csv_col in enumerate(csv_columns):
+                    if possible_name in csv_col or csv_col in possible_name:
+                        found = True
+                        matched_column = {
+                            "index": idx,
+                            "original_name": df.columns[idx],
+                            "matched_pattern": possible_name
+                        }
+                        break
+                if found:
+                    break
+            
+            if found:
+                validation_result["found_columns"][required_type] = matched_column
+            else:
+                validation_result["missing_columns"].append({
+                    "type": required_type,
+                    "expected_names": possible_names,
+                    "description": self._get_column_description(required_type)
+                })
+                validation_result["is_valid"] = False
+        
+        return validation_result
+    
+    def _get_column_description(self, column_type: str) -> str:
+        """Get human-readable description for column types"""
+        descriptions = {
+            "date": "Date/timestamp when the question was asked",
+            "country": "Country where the question originated",
+            "language": "Language of the question",
+            "state": "State/province/region information",
+            "question": "The actual question text or kwargs data"
+        }
+        return descriptions.get(column_type, f"Column for {column_type} data")
+    
     async def process_questions_file(
         self, 
         file_content: bytes,
@@ -303,7 +374,43 @@ class DataProcessingService:
             structure, df = self.detect_csv_structure(df)
             
             if progress_callback:
-                await progress_callback(processing_id, "cleaning", 30, "Analyzing data structure...")
+                await progress_callback(processing_id, "validation", 25, "Validating column headers...")
+            
+            # Validate required columns
+            column_validation = self.validate_required_columns(df)
+            
+            if not column_validation["is_valid"]:
+                missing_info = []
+                found_info = []
+                
+                # Build detailed message about what's missing and what's found
+                for missing in column_validation["missing_columns"]:
+                    missing_info.append(
+                        f"• {missing['type'].title()}: {missing['description']} "
+                        f"(expected: {', '.join(missing['expected_names'])})"
+                    )
+                
+                for col_type, col_info in column_validation["found_columns"].items():
+                    found_info.append(
+                        f"• {col_type.title()}: Found '{col_info['original_name']}' "
+                        f"(matched pattern: '{col_info['matched_pattern']}')"
+                    )
+                
+                error_message = (
+                    f"CSV file is missing required column headers. "
+                    f"Found {len(column_validation['found_columns'])} of {len(self.REQUIRED_COLUMNS)} required columns.\n\n"
+                    f"Missing columns:\n" + "\n".join(missing_info) + "\n\n"
+                    f"Found columns:\n" + ("\n".join(found_info) if found_info else "None") + "\n\n"
+                    f"CSV columns detected: {', '.join(column_validation['csv_columns'])}\n\n"
+                    f"Please ensure your CSV file has headers with the expected column names (case-insensitive)."
+                )
+                
+                # Don't send progress callback here - let the ValueError propagate
+                # The route handler will catch it and send proper error via SSE
+                raise ValueError(error_message)
+            
+            if progress_callback:
+                await progress_callback(processing_id, "cleaning", 30, "Column validation passed - analyzing data structure...")
             
             if structure["question_column"] is None:
                 raise ValueError("Could not identify question column in CSV")
@@ -547,11 +654,23 @@ class DataProcessingService:
             return results
             
         except Exception as e:
+            error_message = str(e)
+            
+            # Enhanced error message for column validation failures
+            if "missing required column headers" in error_message.lower():
+                logger.error(f"Column validation failed for {filename}: {error_message}")
+            else:
+                logger.error(f"Processing failed for {filename}: {error_message}")
+            
             error_result = {
                 "processing_id": processing_id,
                 "filename": filename,
                 "status": "failed",
-                "error": str(e),
+                "error": {
+                    "type": "validation_error" if "missing required column headers" in error_message.lower() else "processing_error",
+                    "message": error_message,
+                    "details": "Please check that your CSV file has the correct column headers and format."
+                },
                 "completed_at": datetime.now().isoformat()
             }
             

@@ -111,15 +111,43 @@ async def process_file(
                 # Small delay to allow frontend SSE connection to establish
                 await asyncio.sleep(1.0)
                 
-                await data_processing_service.process_questions_file(
+                result = await data_processing_service.process_questions_file(
                     file_content=file_info["content"],
                     filename=file_info["filename"],
                     processing_id=processing_id,
                     progress_callback=progress_callback
                 )
+                
+                # Send completion message
+                await progress_callback(processing_id, "completion", 100, "Processing completed successfully")
+                
+            except ValueError as validation_error:
+                # Handle validation errors (missing columns, invalid format, etc.)
+                logger.error(f"Validation error in processing {processing_id}: {validation_error}")
+                error_data = {
+                    "type": "error",
+                    "processing_id": processing_id,
+                    "stage": "validation_error",
+                    "progress": 0,
+                    "message": str(validation_error),
+                    "error_type": "validation",
+                    "timestamp": datetime.now().isoformat()
+                }
+                await sse_manager.send_to_client(processing_id, json.dumps(error_data))
+                
             except Exception as e:
+                # Handle other processing errors
                 logger.error(f"Background processing failed: {e}")
-                await progress_callback(processing_id, "error", 0, f"Processing failed: {str(e)}")
+                error_data = {
+                    "type": "error",
+                    "processing_id": processing_id,
+                    "stage": "processing_error",
+                    "progress": 0,
+                    "message": f"Processing failed: {str(e)}",
+                    "error_type": "processing",
+                    "timestamp": datetime.now().isoformat()
+                }
+                await sse_manager.send_to_client(processing_id, json.dumps(error_data))
         
         # Start background task
         background_tasks.add_task(run_processing)

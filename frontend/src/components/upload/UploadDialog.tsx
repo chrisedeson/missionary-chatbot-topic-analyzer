@@ -86,12 +86,23 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
 
           {/* File Format Guide */}
           <div className="space-y-3">
-            <h4 className="font-medium text-sm">Expected CSV Format:</h4>
-            <div className="text-xs text-muted-foreground space-y-1">
-              <p>• CSV file with questions in any column</p>
-              <p>• Supports kwargs JSON format (from Langfuse exports)</p>
-              <p>• Automatic data cleaning and extraction</p>
-              <p>• Maximum file size: 50 MB</p>
+            <h4 className="font-medium text-sm">Required CSV Format:</h4>
+            <div className="text-xs text-muted-foreground space-y-2">
+              <div className="bg-muted/50 p-3 rounded border">
+                <p className="font-medium mb-1">📋 Required Column Headers (case-insensitive):</p>
+                <div className="space-y-1">
+                  <p>• <strong>Date:</strong> date, timestamp, time</p>
+                  <p>• <strong>Country:</strong> country, nation</p>
+                  <p>• <strong>Language:</strong> language, lang</p>
+                  <p>• <strong>State:</strong> state, province, region</p>
+                  <p>• <strong>Question:</strong> question, questions, kwargs</p>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <p>• Supports kwargs JSON format (from Langfuse exports)</p>
+                <p>• Automatic data cleaning and extraction</p>
+                <p>• Maximum file size: 50 MB</p>
+              </div>
             </div>
           </div>
 
