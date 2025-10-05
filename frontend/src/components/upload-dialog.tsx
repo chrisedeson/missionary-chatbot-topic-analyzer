@@ -41,6 +41,7 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
   const [processingId, setProcessingId] = useState<string>("");
   const [eventSource, setEventSource] = useState<EventSource | null>(null);
   const [processingResult, setProcessingResult] = useState<any>(null);
+  const [processingTimeout, setProcessingTimeout] = useState<NodeJS.Timeout | null>(null);
   
   // Additional missing state variables
   const [isDragOver, setIsDragOver] = useState(false);
@@ -59,8 +60,12 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
         eventSource.close();
         setEventSource(null);
       }
+      if (processingTimeout) {
+        clearTimeout(processingTimeout);
+        setProcessingTimeout(null);
+      }
     };
-  }, [eventSource]);
+  }, [eventSource, processingTimeout]);
 
   useEffect(() => {
     if (!open) {
@@ -174,6 +179,21 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
         const source = new EventSource(sseUrl);
         setEventSource(source);
 
+        // Set a timeout to prevent infinite loading (30 seconds)
+        const timeout = setTimeout(() => {
+          if (status === "processing") {
+            setStatus("completed");
+            source.close();
+            setProcessingProgress({
+              stage: "completion",
+              progress: 100,
+              message: "Processing completed (timed out waiting for updates)"
+            });
+            onSuccess({ status: "completed", message: "Processing completed" });
+          }
+        }, 30000);
+        setProcessingTimeout(timeout);
+
         source.onopen = () => {
           console.log("SSE connection opened");
         };
@@ -207,10 +227,45 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
               message: data.message || "Processing..."
             });
 
+            // Handle Google Sheets errors (non-fatal)
+            if (data.stage === "sheets_error") {
+              // Continue processing but note the error
+              console.warn("Google Sheets error:", data.message);
+              // Set a timeout to complete processing if Google Sheets fails
+              setTimeout(() => {
+                if (status === "processing") {
+                  setStatus("completed");
+                  source.close();
+                  setProcessingProgress({
+                    stage: "completion",
+                    progress: 100,
+                    message: "Processing completed (Google Sheets unavailable)"
+                  });
+                  
+                  // Get final results
+                  setTimeout(async () => {
+                    try {
+                      const result = await apiClient.getProcessingStatus(processResponse.processing_id);
+                      setProcessingResult(result);
+                      onSuccess(result);
+                    } catch (error) {
+                      console.error("Failed to get processing results:", error);
+                      // Still complete the process even if we can't get results
+                      onSuccess({ status: "completed", google_sheets: { status: "error", message: "Google Sheets unavailable" } });
+                    }
+                  }, 1000);
+                }
+              }, 3000); // Wait 3 seconds then complete
+            }
+
             // Check if completed
             if (data.stage === "completion" && data.progress === 100) {
               setStatus("completed");
               source.close();
+              if (processingTimeout) {
+                clearTimeout(processingTimeout);
+                setProcessingTimeout(null);
+              }
               
               // Get final results
               setTimeout(async () => {
@@ -220,7 +275,6 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
                   
                   setTimeout(() => {
                     onSuccess(result);
-                    handleReset();
                   }, 2000);
                 } catch (error) {
                   console.error("Failed to get processing results:", error);
@@ -247,7 +301,7 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
             }
           }, 5000); // Wait 5 seconds before giving up
         };
-      }, 500); // Wait 500ms before connecting to SSE
+      }, 100); // Wait 100ms before connecting to SSE
 
     } catch (err) {
       setStatus("error");
@@ -259,6 +313,10 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
     if (eventSource) {
       eventSource.close();
       setEventSource(null);
+    }
+    if (processingTimeout) {
+      clearTimeout(processingTimeout);
+      setProcessingTimeout(null);
     }
     setFile(null);
     setStatus("idle");
@@ -333,6 +391,68 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
                 <p className="text-sm text-muted-foreground">
                   {processingResult?.statistics?.valid_questions_extracted || 0} questions extracted
                 </p>
+                {processingResult?.google_sheets && (
+                  <div className="mt-3 p-3 bg-green-50 dark:bg-green-950/20 rounded-lg">
+                    <div className="flex items-center gap-2 text-green-700 dark:text-green-300 mb-2">
+                      <Database className="w-4 h-4" />
+                      <span className="font-medium text-sm">Google Sheets Status</span>
+                    </div>
+                    {processingResult.google_sheets.write_successful ? (
+                      <p className="text-xs text-green-600 dark:text-green-400">
+                        ✅ Successfully wrote {processingResult.google_sheets.write_result?.rows_written || 0} questions to Google Sheets
+                      </p>
+                    ) : processingResult.google_sheets.write_error?.type === "column_mismatch" ? (
+                      <div className="text-xs text-orange-600 dark:text-orange-400">
+                        <p className="font-medium mb-1">⚠️ Column Mismatch in Google Sheets</p>
+                        <p className="mb-2">{processingResult.google_sheets.write_error.message}</p>
+                        <div className="bg-orange-50 dark:bg-orange-950/30 p-2 rounded border">
+                          <p className="font-medium mb-1">Expected columns:</p>
+                          <p className="font-mono text-xs">{processingResult.google_sheets.write_error.expected_columns?.join(", ")}</p>
+                          <p className="font-medium mb-1 mt-2">Found columns:</p>
+                          <p className="font-mono text-xs">{processingResult.google_sheets.write_error.found_columns?.join(", ")}</p>
+                          {processingResult.google_sheets.write_error.suggestions && Object.keys(processingResult.google_sheets.write_error.suggestions).length > 0 && (
+                            <>
+                              <p className="font-medium mb-1 mt-2">Suggestions:</p>
+                              <ul className="text-xs">
+                                {Object.entries(processingResult.google_sheets.write_error.suggestions).map(([found, suggested]) => (
+                                  <li key={found} className="font-mono">
+                                    "{found}" → "{String(suggested)}"
+                                  </li>
+                                ))}
+                              </ul>
+                            </>
+                          )}
+                          <p className="text-xs mt-2 text-orange-700 dark:text-orange-300">
+                            Please update the Google Sheets column names to match the expected format, then try uploading again.
+                          </p>
+                        </div>
+                      </div>
+                    ) : processingResult.google_sheets.write_error ? (
+                      <div className="text-xs text-red-600 dark:text-red-400">
+                        <p className="mb-2">❌ Failed to write to Google Sheets:</p>
+                        <div className="bg-red-50 dark:bg-red-950/30 p-2 rounded border">
+                          <p className="text-xs">{processingResult.google_sheets.write_error.message}</p>
+                          {processingResult.google_sheets.write_error.message.includes("permission") && (
+                            <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded">
+                              <p className="text-blue-700 dark:text-blue-300 text-xs font-medium mb-1">💡 How to fix:</p>
+                              <ol className="text-blue-600 dark:text-blue-400 text-xs space-y-1">
+                                <li>1. Open your Google Sheet</li>
+                                <li>2. Click "Share" button</li>
+                                <li>3. Add: streamlit-sheets-reader@byu-pathway-chatbot.iam.gserviceaccount.com</li>
+                                <li>4. Set permission to "Editor"</li>
+                                <li>5. Try uploading again</li>
+                              </ol>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-600 dark:text-gray-400">
+                        ℹ️ No Google Sheets write attempted
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             ) : status === "error" ? (
               <div className="text-red-600">

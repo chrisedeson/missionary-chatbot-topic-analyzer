@@ -19,6 +19,7 @@ from pathlib import Path
 import io
 
 from app.core.config import settings
+from app.services.google_sheets import google_sheets_service, ColumnMismatchError
 
 logger = logging.getLogger(__name__)
 
@@ -392,15 +393,52 @@ class DataProcessingService:
             if progress_callback:
                 await progress_callback(processing_id, "deduplication", 78, f"Removed {duplicates_removed} duplicates, {len(questions)} unique questions remain")
             
-            # TODO: Update Google Sheets
-            if progress_callback:
-                await progress_callback(processing_id, "sheets_update", 80, "Updating Google Sheets...")
-            
-            # Simulate sheets update for now
-            await asyncio.sleep(2)
+            # Write to Google Sheets
+            sheets_result = None
+            sheets_error = None
             
             if progress_callback:
-                await progress_callback(processing_id, "completion", 100, "Processing completed successfully!")
+                await progress_callback(processing_id, "sheets_update", 80, "Writing to Google Sheets...")
+            
+            try:
+                # Write questions to Google Sheets
+                sheets_result = google_sheets_service.write_questions_to_sheet(
+                    questions=questions,
+                    sheet_id=settings.QUESTIONS_SHEET_ID
+                )
+                
+                if progress_callback:
+                    await progress_callback(processing_id, "sheets_update", 90, f"Successfully wrote {sheets_result['rows_written']} questions to Google Sheets")
+                
+            except ColumnMismatchError as e:
+                sheets_error = {
+                    "type": "column_mismatch",
+                    "message": e.message,
+                    "expected_columns": e.expected_columns,
+                    "found_columns": e.found_columns,
+                    "suggestions": e.suggestions
+                }
+                logger.warning(f"Google Sheets column mismatch: {e.message}")
+                
+                if progress_callback:
+                    await progress_callback(processing_id, "sheets_error", 85, f"Google Sheets column mismatch: {e.message}")
+                
+            except Exception as e:
+                sheets_error = {
+                    "type": "write_error",
+                    "message": str(e)
+                }
+                logger.error(f"Error writing to Google Sheets: {e}")
+                
+                if progress_callback:
+                    await progress_callback(processing_id, "sheets_error", 85, f"Failed to write to Google Sheets: {str(e)}")
+            
+            # Always complete processing, even if Google Sheets failed
+            if progress_callback:
+                completion_message = "Processing completed successfully!"
+                if sheets_error:
+                    completion_message = "Processing completed (Google Sheets unavailable)"
+                await progress_callback(processing_id, "completion", 100, completion_message)
             
             # Store results
             results = {
@@ -419,6 +457,12 @@ class DataProcessingService:
                 "structure_analysis": self._convert_numpy_types(structure),
                 "sample_questions": questions[:5],  # First 5 for preview
                 "errors": cleaning_errors[:10],  # First 10 errors
+                "google_sheets": {
+                    "write_attempted": True,
+                    "write_successful": sheets_result is not None,
+                    "write_result": sheets_result,
+                    "write_error": sheets_error
+                },
                 "completed_at": datetime.now().isoformat()
             }
             

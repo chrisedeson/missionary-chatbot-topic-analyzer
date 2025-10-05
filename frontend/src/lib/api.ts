@@ -79,7 +79,7 @@ class ApiClient {
     return this.request('/dashboard')
   }
 
-  async getDashboardMetrics() {
+  async getDashboardMetrics(): Promise<DashboardData> {
     return this.request('/dashboard/metrics')
   }
 

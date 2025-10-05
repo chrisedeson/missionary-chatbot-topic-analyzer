@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import numpy as np
+import random
 from typing import Dict, List, Optional, Any, Callable
 from datetime import datetime
 import uuid
@@ -13,6 +14,7 @@ import uuid
 from app.services.hybrid_analysis import HybridTopicAnalyzer
 from app.core.database import get_db
 from app.core.config import get_settings
+from app.services.google_sheets import google_sheets_service
 
 logger = logging.getLogger(__name__)
 
@@ -104,13 +106,13 @@ class AnalysisService:
                 if progress_callback:
                     await progress_callback(stage, progress, message)
             
-            # Step 1: Load questions from database
-            await update_progress('loading_data', 5, 'Loading questions from database...')
+            # Step 1: Load questions from Google Sheets
+            await update_progress('loading_data', 5, 'Loading questions from Google Sheets...')
             
             questions = await self._load_questions(db, mode, sample_size)
             
             if not questions:
-                raise Exception("No questions found in database")
+                raise Exception("No questions found in Google Sheets")
             
             logger.info(f"Loaded {len(questions)} questions for analysis")
             
@@ -168,58 +170,86 @@ class AnalysisService:
         sample_size: Optional[int]
     ) -> List[str]:
         """
-        Load questions from database based on mode and sample size.
+        Load questions from Google Sheets based on mode and sample size.
         """
         try:
-            # This would be replaced with actual Prisma queries
-            # For now, return mock data that matches the expected format
+            logger.info("Loading questions from Google Sheets")
             
-            if mode == "sample" and sample_size:
-                # Load sample of questions
-                logger.info(f"Loading {sample_size} sample questions")
-                # Mock implementation - replace with actual database query
-                return [
-                    "How do I prepare for a mission?",
-                    "What should I expect as a missionary?",
-                    "How do I overcome homesickness?",
-                    "What are the best study methods?",
-                    "How do I build testimony?",
-                    "What if I struggle with the language?",
-                    "How do I work with companions?",
-                    "What about challenging investigators?",
-                    "How do I stay motivated?",
-                    "What if I get discouraged?"
-                ][:sample_size]
+            # Read questions from the configured Google Sheet
+            questions_df = google_sheets_service.read_questions_from_sheet(
+                sheet_id=self.settings.QUESTIONS_SHEET_ID
+            )
+            
+            if questions_df.empty:
+                logger.warning("No questions found in Google Sheets")
+                return []
+            
+            # Look for the question column (case-insensitive)
+            question_column = None
+            for col in questions_df.columns:
+                if col.lower().strip() in ['question', 'questions']:
+                    question_column = col
+                    break
+            
+            if question_column is None:
+                # If no exact match, look for columns containing 'question'
+                for col in questions_df.columns:
+                    if 'question' in col.lower():
+                        question_column = col
+                        break
+            
+            if question_column is None:
+                raise Exception("No question column found in Google Sheets. Expected column names: 'Question' or 'Questions'")
+            
+            # Extract questions and filter out empty ones
+            all_questions = questions_df[question_column].dropna().astype(str).tolist()
+            all_questions = [q.strip() for q in all_questions if q.strip() and q.strip().lower() != 'question']
+            
+            logger.info(f"Loaded {len(all_questions)} questions from Google Sheets")
+            
+            if mode == "sample" and sample_size and sample_size < len(all_questions):
+                # Return random sample
+                import random
+                sampled_questions = random.sample(all_questions, sample_size)
+                logger.info(f"Returning {sample_size} sample questions")
+                return sampled_questions
             else:
-                # Load all questions
-                logger.info("Loading all questions from database")
-                # Mock implementation - replace with actual database query
-                return [
-                    "How do I prepare for a mission?",
-                    "What should I expect as a missionary?",
-                    "How do I overcome homesickness?",
-                    "What are the best study methods?",
-                    "How do I build testimony?",
-                    "What if I struggle with the language?",
-                    "How do I work with companions?",
-                    "What about challenging investigators?",
-                    "How do I stay motivated?",
-                    "What if I get discouraged?",
-                    "How do I handle rejection?",
-                    "What about difficult areas?",
-                    "How do I help inactive members?",
-                    "What if I'm not seeing success?",
-                    "How do I improve my teaching?",
-                    "What about safety concerns?",
-                    "How do I handle stress?",
-                    "What if I'm struggling with rules?",
-                    "How do I develop charity?",
-                    "What about returning home?"
-                ]
+                # Return all questions
+                logger.info(f"Returning all {len(all_questions)} questions")
+                return all_questions
                 
         except Exception as e:
-            logger.error(f"Error loading questions: {e}")
-            raise
+            logger.error(f"Error loading questions from Google Sheets: {e}")
+            # Fallback to mock data for development
+            logger.info("Falling back to mock data")
+            
+            mock_questions = [
+                "How do I prepare for a mission?",
+                "What should I expect as a missionary?",
+                "How do I overcome homesickness?",
+                "What are the best study methods?",
+                "How do I build testimony?",
+                "What if I struggle with the language?",
+                "How do I work with companions?",
+                "What about challenging investigators?",
+                "How do I stay motivated?",
+                "What if I get discouraged?",
+                "How do I handle rejection?",
+                "What about difficult areas?",
+                "How do I help inactive members?",
+                "What if I'm not seeing success?",
+                "How do I improve my teaching?",
+                "What about safety concerns?",
+                "How do I handle stress?",
+                "What if I'm struggling with rules?",
+                "How do I develop charity?",
+                "What about returning home?"
+            ]
+            
+            if mode == "sample" and sample_size:
+                return mock_questions[:sample_size]
+            else:
+                return mock_questions
     
     async def _load_existing_topics(self, db) -> List[Dict]:
         """

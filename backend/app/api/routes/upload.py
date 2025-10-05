@@ -108,6 +108,9 @@ async def process_file(
         # Start processing in background
         async def run_processing():
             try:
+                # Small delay to allow frontend SSE connection to establish
+                await asyncio.sleep(1.0)
+                
                 await data_processing_service.process_questions_file(
                     file_content=file_info["content"],
                     filename=file_info["filename"],
