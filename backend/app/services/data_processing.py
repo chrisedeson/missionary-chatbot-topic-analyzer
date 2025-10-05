@@ -28,6 +28,79 @@ class DataProcessingService:
     def __init__(self):
         self.active_processes: Dict[str, Dict] = {}
     
+    def clean_acm_prefix(self, question: str) -> str:
+        """
+        Remove ACM question prefix from questions before processing.
+        
+        This function removes prefixes like "(ACMs Question):" or "(ACM question):"
+        that identify questions from ACM missionaries. These prefixes should be removed
+        before processing to prevent clustering based on source rather than content.
+        
+        Args:
+            question (str): The original question text
+        
+        Returns:
+            str: The cleaned question text with ACM prefix removed
+        """
+        if not isinstance(question, str):
+            return str(question) if question is not None else ""
+        
+        # Pattern to match ACM prefixes (case-insensitive)
+        # Patterns to match:
+        # - (ACMs Question):
+        # - (ACM question):
+        # - (ACMs Question)
+        # - (ACM question)
+        # Add colon as optional to handle both formats
+        pattern = r'^\s*\(ACMs?\s+[Qq]uestion\)\s*:?\s*'
+        
+        # Remove the prefix and strip any remaining whitespace
+        cleaned = re.sub(pattern, '', question, flags=re.IGNORECASE).strip()
+        
+        # Return original question if nothing was removed and it's empty after cleaning
+        return cleaned if cleaned else question
+    
+    def remove_duplicates(self, questions: List[Dict]) -> List[Dict]:
+        """
+        Remove duplicates based on timestamp and question text.
+        
+        Duplication is defined as having the same timestamp AND the same question text. This prevents 
+        re-processing of questions that already exist in the system from past uploads, ensuring that 
+        re-uploading the same data (e.g., from a file or backup) does not result in duplication.
+        
+        Args:
+            questions: List of question dictionaries with metadata
+        
+        Returns:
+            List of unique questions with duplicates removed
+        """
+        seen = set()
+        unique_questions = []
+        duplicates_removed = 0
+        
+        for question in questions:
+            # Create a key from timestamp and cleaned question text
+            timestamp = question.get('metadata', {}).get('date', '')
+            question_text = question.get('extracted_question', '')
+            
+            # Clean the question text for comparison (remove ACM prefix, normalize whitespace)
+            clean_text = self.clean_acm_prefix(question_text).strip().lower()
+            
+            # Create composite key for duplicate detection
+            duplicate_key = (str(timestamp), clean_text)
+            
+            if duplicate_key not in seen:
+                seen.add(duplicate_key)
+                unique_questions.append(question)
+            else:
+                duplicates_removed += 1
+                logger.debug(f"Removed duplicate question: timestamp={timestamp}, question='{question_text[:50]}...'")
+        
+        if duplicates_removed > 0:
+            logger.info(f"Removed {duplicates_removed} duplicate questions (same timestamp + question)")
+        
+        return unique_questions
+    
     def extract_question_from_kwargs(self, kwargs_content: str) -> Optional[str]:
         """
         Extract the actual question from kwargs JSON structure.
@@ -74,32 +147,46 @@ class DataProcessingService:
     def clean_question_text(self, text: str) -> Optional[str]:
         """Clean and validate question text"""
         if not text or not isinstance(text, str):
+            logger.debug(f"Skipping non-string or empty text: {repr(text)}")
             return None
+        
+        # First, remove ACM prefix if present
+        text = self.clean_acm_prefix(text)
         
         # Remove extra whitespace
         text = re.sub(r'\s+', ' ', text.strip())
         
         # Skip empty strings after cleaning
         if not text:
+            logger.debug(f"Skipping empty text after whitespace cleaning")
             return None
         
         try:
             # Remove common noise
+            original_text = text
             text = re.sub(r'^(Question:\s*|Q:\s*|\d+\.\s*)', '', text, flags=re.IGNORECASE)
             
             # Must be at least 3 characters and not just numbers/symbols
-            if len(text) < 3 or re.match(r'^[\d\s\-_.,;:!?]*$', text):
+            if len(text) < 3:
+                logger.debug(f"Skipping text too short (<3 chars): '{original_text}' -> '{text}'")
+                return None
+            if re.match(r'^[\d\s\-_.,;:!?]*$', text):
+                logger.debug(f"Skipping text with only numbers/symbols: '{original_text}' -> '{text}'")
                 return None
         except Exception as e:
             logger.warning(f"Regex error in clean_question_text: {e}, text: '{text}'")
             return None
         
+        logger.debug(f"Successfully cleaned text: '{original_text}' -> '{text}'")
         return text
     
-    def detect_csv_structure(self, df: pd.DataFrame) -> Dict[str, Any]:
+    def detect_csv_structure(self, df: pd.DataFrame) -> tuple[Dict[str, Any], pd.DataFrame]:
         """
         Analyze CSV structure and detect columns.
         Handle cases with/without headers, different column orders.
+        
+        Returns:
+            Tuple of (structure_info, processed_dataframe)
         """
         structure = {
             "has_headers": False,
@@ -121,6 +208,7 @@ class DataProcessingService:
                 structure["has_headers"] = True
                 df.columns = first_row.astype(str)
                 df = df.drop(df.index[0]).reset_index(drop=True)
+                structure["total_rows"] = len(df)  # Update count after header removal
         
         # Find question column
         for i, col in enumerate(df.columns):
@@ -139,13 +227,19 @@ class DataProcessingService:
             # Look for question-like content
             question_indicators = [
                 'question', 'what', 'how', 'why', 'when', 'where', 
-                'can', 'should', 'would', 'could', '?'
+                'can', 'should', 'would', 'could', r'\?'  # Escape the question mark
             ]
             
             question_score = 0
             try:
                 for indicator in question_indicators:
-                    question_score += sample_data.str.contains(indicator, case=False, na=False).sum()
+                    # Use regex=False for literal string matching except for question mark
+                    is_regex = indicator.startswith('r')
+                    if is_regex:
+                        indicator = indicator[1:]  # Remove 'r' prefix
+                    question_score += sample_data.str.contains(
+                        indicator, case=False, na=False, regex=is_regex
+                    ).sum()
             except Exception as e:
                 logger.warning(f"Error scoring questions in column {i}: {e}")
                 question_score = 0
@@ -162,7 +256,7 @@ class DataProcessingService:
                 }
                 break
         
-        return structure
+        return structure, df
     
     async def process_questions_file(
         self, 
@@ -205,7 +299,7 @@ class DataProcessingService:
                 await progress_callback(processing_id, "validation", 20, f"Loaded {len(df)} rows")
             
             # Analyze structure
-            structure = self.detect_csv_structure(df)
+            structure, df = self.detect_csv_structure(df)
             
             if progress_callback:
                 await progress_callback(processing_id, "cleaning", 30, "Analyzing data structure...")
@@ -276,6 +370,28 @@ class DataProcessingService:
             if progress_callback:
                 await progress_callback(processing_id, "cleaning", 70, f"Extracted {len(questions)} valid questions")
             
+            # Remove duplicates based on timestamp + question
+            if progress_callback:
+                await progress_callback(processing_id, "deduplication", 75, "Removing duplicates...")
+            
+            original_count = len(questions)
+            questions = self.remove_duplicates(questions)
+            duplicates_removed = original_count - len(questions)
+            
+            if progress_callback:
+                await progress_callback(processing_id, "deduplication", 78, f"Removed {duplicates_removed} duplicates, {len(questions)} unique questions remain")
+            
+            # Remove duplicates based on timestamp + question
+            if progress_callback:
+                await progress_callback(processing_id, "deduplication", 75, "Removing duplicates...")
+            
+            original_count = len(questions)
+            questions = self.remove_duplicates(questions)
+            duplicates_removed = original_count - len(questions)
+            
+            if progress_callback:
+                await progress_callback(processing_id, "deduplication", 78, f"Removed {duplicates_removed} duplicates, {len(questions)} unique questions remain")
+            
             # TODO: Update Google Sheets
             if progress_callback:
                 await progress_callback(processing_id, "sheets_update", 80, "Updating Google Sheets...")
@@ -292,13 +408,15 @@ class DataProcessingService:
                 "filename": filename,
                 "status": "completed",
                 "statistics": {
-                    "total_rows_processed": len(df),
-                    "valid_questions_extracted": len(questions),
-                    "kwargs_rows_processed": kwargs_processed,
-                    "cleaning_errors": len(cleaning_errors),
-                    "success_rate": len(questions) / len(df) if len(df) > 0 else 0
+                    "total_rows_processed": int(len(df)),  # Convert to Python int
+                    "questions_before_deduplication": int(original_count),
+                    "duplicates_removed": int(duplicates_removed),
+                    "valid_questions_extracted": int(len(questions)),
+                    "kwargs_rows_processed": int(kwargs_processed),
+                    "cleaning_errors": int(len(cleaning_errors)),
+                    "success_rate": float(len(questions) / len(df)) if len(df) > 0 else 0.0
                 },
-                "structure_analysis": structure,
+                "structure_analysis": self._convert_numpy_types(structure),
                 "sample_questions": questions[:5],  # First 5 for preview
                 "errors": cleaning_errors[:10],  # First 10 errors
                 "completed_at": datetime.now().isoformat()
@@ -332,6 +450,22 @@ class DataProcessingService:
     def get_all_processing_history(self) -> List[Dict]:
         """Get history of all processing jobs"""
         return list(self.active_processes.values())
+    
+    def _convert_numpy_types(self, obj):
+        """Convert numpy types to Python native types for JSON serialization"""
+        import numpy as np
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, dict):
+            return {key: self._convert_numpy_types(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_numpy_types(item) for item in obj]
+        else:
+            return obj
 
 # Global service instance
 data_processing_service = DataProcessingService()

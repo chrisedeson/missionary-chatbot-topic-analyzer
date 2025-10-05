@@ -41,6 +41,15 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
   const [processingId, setProcessingId] = useState<string>("");
   const [eventSource, setEventSource] = useState<EventSource | null>(null);
   const [processingResult, setProcessingResult] = useState<any>(null);
+  
+  // Additional missing state variables
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileName, setFileName] = useState("");
+  const [fileSize, setFileSize] = useState("");
+  const [isUploaded, setIsUploaded] = useState(false);
+  const [processingResults, setProcessingResults] = useState<any>(null);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Clean up event source on unmount or dialog close
@@ -62,31 +71,59 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
     }
   }, [open, eventSource]);
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = event.target.files?.[0];
-    if (selectedFile) {
-      setFile(selectedFile);
-      setStatus("idle");
-      setError("");
-      setUploadId("");
-      setProcessingId("");
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (files && files[0]) {
+      const file = files[0]
+      setFile(file)  // Use the main file state
+      setSelectedFile(file)
+      setFileName(file.name)
+      
+      // Properly calculate file size
+      const sizeInMB = file.size / (1024 * 1024)
+      setFileSize(sizeInMB.toFixed(2))
+      
+      setError('')
+      setIsUploaded(false)
+      setProcessingId('')
+      setProcessingResults(null)
     }
-  };
+  }
 
-  const handleDrop = (event: React.DragEvent) => {
-    event.preventDefault();
-    const droppedFile = event.dataTransfer.files[0];
-    if (droppedFile) {
-      setFile(droppedFile);
-      setStatus("idle");
-      setError("");
-      setUploadId("");
-      setProcessingId("");
+    const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    setIsDragOver(false)
+    
+    const files = e.dataTransfer.files
+    if (files && files[0]) {
+      const file = files[0]
+      setFile(file)  // Use the main file state
+      setSelectedFile(file)
+      setFileName(file.name)
+      
+      // Properly calculate file size for drag and drop
+      const sizeInMB = file.size / (1024 * 1024)
+      setFileSize(sizeInMB.toFixed(2))
+      
+      setError('')
+      setIsUploaded(false)
+      setProcessingId('')
+      setProcessingResults(null)
     }
-  };
+  }
 
   const handleDragOver = (event: React.DragEvent) => {
     event.preventDefault();
+  };
+
+  const handleDragEnter = (event: React.DragEvent) => {
+    event.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (event: React.DragEvent) => {
+    event.preventDefault();
+    setIsDragOver(false);
   };
 
   const handleUpload = async () => {
@@ -268,19 +305,23 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
           {/* File Drop Zone */}
           <div
             className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-              status === "uploading" || status === "processing"
+              isDragOver
+                ? "border-primary bg-primary/5"
+                : status === "uploading" || status === "processing"
                 ? "border-muted-foreground/25 bg-muted/25"
                 : "border-muted-foreground/25 hover:border-muted-foreground/50 cursor-pointer"
             }`}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
             onClick={() => !status.match(/uploading|processing/) && fileInputRef.current?.click()}
           >
             <input
               ref={fileInputRef}
               type="file"
               accept=".csv"
-              onChange={handleFileSelect}
+              onChange={handleFileChange}
               className="hidden"
               disabled={status === "uploading" || status === "processing"}
             />

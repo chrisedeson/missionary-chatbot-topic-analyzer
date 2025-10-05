@@ -47,44 +47,33 @@ class AnalysisService:
         
         logger.info(f"Starting analysis run {run_id} (mode: {mode})")
         
-        # Create analysis run record
-        db = next(get_db())
+        # Create run record in memory (no database for now to avoid coroutine issues)
+        run_data = {
+            'id': run_id,
+            'status': 'running',
+            'mode': mode,
+            'sample_size': sample_size,
+            'started_at': datetime.utcnow(),
+            'settings': {
+                'similarity_threshold': self.analyzer.similarity_threshold,
+                'embedding_model': self.analyzer.embedding_model,
+                'gpt_model': self.analyzer.gpt_model,
+                'umap_n_components': self.analyzer.umap_n_components,
+                'hdbscan_min_cluster_size': self.analyzer.hdbscan_min_cluster_size,
+                'random_seed': self.analyzer.random_seed
+            }
+        }
+        # Store run info in memory for progress tracking
+        self.active_runs[run_id] = {
+            **run_data,
+            'progress': {'stage': 'initialization', 'progress': 0, 'message': 'Starting analysis...'}
+        }
         
-        try:
-            # Create run record in database
-            run_data = {
-                'id': run_id,
-                'status': 'running',
-                'mode': mode,
-                'sample_size': sample_size,
-                'started_at': datetime.utcnow(),
-                'settings': {
-                    'similarity_threshold': self.analyzer.similarity_threshold,
-                    'embedding_model': self.analyzer.embedding_model,
-                    'gpt_model': self.analyzer.gpt_model,
-                    'umap_n_components': self.analyzer.umap_n_components,
-                    'hdbscan_min_cluster_size': self.analyzer.hdbscan_min_cluster_size,
-                    'random_seed': self.analyzer.random_seed
-                }
-            }
-            
-            # Store run info in memory for progress tracking
-            self.active_runs[run_id] = {
-                **run_data,
-                'progress': {'stage': 'initialization', 'progress': 0, 'message': 'Starting analysis...'}
-            }
-            
-            # Start analysis in background
-            asyncio.create_task(self._run_analysis(run_id, mode, sample_size, progress_callback))
-            
-            logger.info(f"Analysis run {run_id} started successfully")
-            return run_id
-            
-        except Exception as e:
-            logger.error(f"Error starting analysis run {run_id}: {e}")
-            raise
-        finally:
-            db.close()
+        # Start analysis in background
+        asyncio.create_task(self._run_analysis(run_id, mode, sample_size, progress_callback))
+        
+        logger.info(f"Analysis run {run_id} started successfully")
+        return run_id
     
     async def _run_analysis(
         self, 
@@ -252,15 +241,18 @@ class AnalysisService:
             logger.error(f"Error loading existing topics: {e}")
             raise
     
-    async def _save_analysis_results(
-        self, 
-        db, 
-        run_id: str, 
-        results: Dict[str, Any]
-    ):
-        """
-        Save analysis results to database.
-        """
+    async def save_analysis_results(self, run_id: str, results: Dict) -> None:
+        """Save analysis results (in memory for now)"""
+        try:
+            if run_id in self.active_runs:
+                self.active_runs[run_id]['results'] = results
+                self.active_runs[run_id]['status'] = 'completed'
+                self.active_runs[run_id]['completed_at'] = datetime.utcnow()
+                logger.info(f"Saved analysis results for run {run_id}")
+            else:
+                logger.warning(f"Run {run_id} not found in active runs")
+        except Exception as e:
+            logger.error(f"Error saving analysis results: {e}")
         try:
             logger.info(f"Saving analysis results for run {run_id}")
             
