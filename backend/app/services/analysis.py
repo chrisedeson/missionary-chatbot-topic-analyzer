@@ -491,5 +491,35 @@ class AnalysisService:
             'export_timestamp': datetime.utcnow().isoformat()
         }
 
+    async def _save_analysis_results(self, db, run_id: str, results: Dict[str, Any]):
+        """
+        Save analysis results to database.
+        For now, store in memory with the run data.
+        """
+        try:
+            logger.info(f"Saving analysis results for run {run_id}")
+            
+            if run_id in self.active_runs:
+                # Store results summary in memory
+                self.active_runs[run_id]['results'] = results
+                self.active_runs[run_id]['results_summary'] = {
+                    'total_questions_analyzed': results.get('total_questions_analyzed', 0),
+                    'similar_questions_count': results.get('similar_questions', {}).get('count', 0),
+                    'new_topics_count': results.get('new_topics', {}).get('count', 0),
+                    'analysis_id': results.get('analysis_id', ''),
+                    'completed_at': results.get('completed_at', datetime.utcnow().isoformat())
+                }
+                
+                logger.info(f"Analysis results saved for run {run_id}")
+                logger.info(f"   Total questions: {results.get('total_questions_analyzed', 0)}")
+                logger.info(f"   Similar questions: {results.get('similar_questions', {}).get('count', 0)}")
+                logger.info(f"   New topics: {results.get('new_topics', {}).get('count', 0)}")
+            else:
+                logger.warning(f"Run {run_id} not found in active runs")
+                
+        except Exception as e:
+            logger.error(f"Error saving analysis results for run {run_id}: {e}")
+            # Don't raise - this shouldn't fail the analysis
+
 # Global instance
 analysis_service = AnalysisService()
