@@ -247,6 +247,21 @@ class QuestionsService:
 # Global service instance
 questions_service = None
 
+
+async def init_questions_service():
+    """Initialize the global questions service"""
+    global questions_service
+    try:
+        db = await get_db()
+        if db:
+            questions_service = QuestionsService(db)
+            logger.info("Questions service initialized successfully")
+        else:
+            logger.warning("Database not available, questions service not initialized")
+    except Exception as e:
+        logger.error(f"Failed to initialize questions service: {e}")
+
+
 async def get_questions_service() -> QuestionsService:
     """Dependency to get questions service"""
     global questions_service

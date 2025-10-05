@@ -38,6 +38,15 @@ async def lifespan(app: FastAPI):
     # Initialize database
     await init_db()
     
+    # Initialize services after database connection
+    try:
+        from app.services.questions import init_questions_service
+        await init_questions_service()
+        logger.info("Services initialized successfully")
+    except Exception as e:
+        logger.warning(f"Failed to initialize services: {e}")
+        logger.info("Continuing without service initialization (development mode)")
+    
     yield
     
     logger.info("Shutting down BYU Pathway Topic Analyzer API")
