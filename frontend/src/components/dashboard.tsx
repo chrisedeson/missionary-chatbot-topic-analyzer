@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardContent, CardTitle, CardDescription } from "@/components/ui/card";
 import { StatsGrid } from "@/components/stats-grid";
 import { AnalysisResults } from "@/components/analysis-results";
-import { UploadDialog } from "@/components/upload-dialog";
+import { UploadDialog } from "./upload";
 import { ProgressTracker } from "@/components/progress-tracker";
 import { apiClient } from "@/lib/api";
 import type { DashboardData, AnalysisRun } from "@/lib/types";
