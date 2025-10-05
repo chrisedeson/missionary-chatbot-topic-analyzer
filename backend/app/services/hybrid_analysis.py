@@ -113,10 +113,8 @@ class GPT5Config:
             "model": self.MODEL,
             "messages": messages,
             "max_completion_tokens": self.MAX_COMPLETION_TOKENS,
+            "temperature": self.TEMPERATURE  # Always include temperature for GPT-5
         }
-        # Only add temperature if it's not the default
-        if self.TEMPERATURE != 1:
-            params["temperature"] = self.TEMPERATURE
         return params
 
 class HybridTopicAnalyzer:
@@ -369,6 +367,7 @@ Instructions:
 - Avoid generic labels like "General Questions" or "Miscellaneous."
 - Do not include "Topic name:" or quotation marks.
 - Use simple, natural English that sounds clear to a student or teacher.
+- Be specific and descriptive.
 
 Example:
 Questions:
@@ -376,36 +375,52 @@ Questions:
 - What are the fall 2025 enrollment deadlines?
 Keywords: registration, deadlines
 
-Topic name: Fall 2025 Registration Deadlines
+Output: Fall 2025 Registration Deadlines
 
-Now generate the topic name for the questions above:
+Now generate the topic name:
 """
 
         try:
             messages = [
-                {"role": "system", "content": "You are an expert at creating clear, descriptive topic names for student question categories."},
+                {"role": "system", "content": "You are an expert at creating clear, descriptive topic names for student question categories. Always respond with just the topic name, nothing else."},
                 {"role": "user", "content": prompt}
             ]
 
             api_params = self.gpt5_config.get_api_params(messages)
+            logger.info(f"Calling GPT-5 with model: {api_params['model']} and temperature: {api_params.get('temperature')}")
+            
             response = await self.client.chat.completions.create(**api_params)
 
-            topic_name = response.choices[0].message.content.strip()
-
-            # Clean up the response
-            topic_name = topic_name.replace("Topic name:", "").strip()
-            topic_name = topic_name.strip('"\'')
+            topic_name = response.choices[0].message.content
+            logger.info(f"GPT-5 raw response: '{topic_name}'")
+            
+            if topic_name:
+                topic_name = topic_name.strip()
+                # Clean up the response more aggressively
+                topic_name = topic_name.replace("Topic name:", "").strip()
+                topic_name = topic_name.replace("Output:", "").strip()
+                topic_name = topic_name.strip('"\'')
+                logger.info(f"Cleaned topic name: '{topic_name}'")
 
             # Validate and limit length
-            if len(topic_name) > 100 or len(topic_name) < 3:
+            if not topic_name or len(topic_name) > 100 or len(topic_name) < 3:
+                logger.warning(f"Invalid topic name length or empty: '{topic_name}'")
                 raise ValueError(f"Invalid topic name length: {topic_name}")
 
             return topic_name
 
         except Exception as e:
             logger.warning(f"GPT-5 topic naming failed: {e}")
-            # Fallback to keyword-based name
-            return f"Topic: {keywords[:50]}"
+            # Improved fallback to keyword-based name
+            if keywords and keywords.strip():
+                fallback_name = f"Topic: {keywords[:47]}"  # Leave room for "Topic: "
+                logger.info(f"Using fallback topic name: {fallback_name}")
+                return fallback_name
+            else:
+                # Ultimate fallback if no keywords
+                fallback_name = f"Untitled Topic"
+                logger.info(f"Using ultimate fallback: {fallback_name}")
+                return fallback_name
 
     async def perform_hybrid_analysis(
         self, 
