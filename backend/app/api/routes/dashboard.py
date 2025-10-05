@@ -5,6 +5,7 @@ import structlog
 
 from app.core.database import get_db
 from app.core.auth import get_optional_developer
+from app.services.analysis import analysis_service
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -19,17 +20,18 @@ async def get_dashboard_metrics(
     
     logger.info("Fetching dashboard metrics", developer_authenticated=bool(developer))
     
-    # TODO: Implement actual metrics from database
-    # For now, return mock data matching the requirements
+    # Get actual question count from Google Sheets
+    question_count = await analysis_service.get_questions_count()
+    has_sufficient_questions = question_count >= 10
     
     return {
         # Match the frontend DashboardData interface
-        "question_count": 0,  # TODO: Get actual count from database
+        "question_count": question_count,
         "topic_count": 0,     # TODO: Get actual count from database
         "last_analysis": None,  # TODO: Get from database
         "last_updated": None,   # TODO: Get from database
         "coverage_percentage": 0,  # TODO: Calculate from database
-        "has_questions": True,  # Enable analysis button (TODO: check actual questions)
+        "has_questions": has_sufficient_questions,  # Enable analysis only if >=10 questions
         
         # Additional insights for dashboard widgets
         "recent_insights": {
@@ -46,11 +48,11 @@ async def get_dashboard_metrics(
             }
         },
         "totals": {
-            "total_questions": 0,
+            "total_questions": question_count,
             "total_topics": 0,
             "total_countries": 0,
             "last_analysis": None,
-            "has_questions": True  # Enable analysis button for now (TODO: check actual questions count)
+            "has_questions": has_sufficient_questions  # Enable analysis only if >=10 questions
         }
     }
 

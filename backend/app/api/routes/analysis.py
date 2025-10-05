@@ -40,6 +40,14 @@ async def start_analysis(
     try:
         logger.info(f"Starting analysis: mode={request.mode}, sample_size={request.sample_size}")
         
+        # Check if sufficient questions are available
+        question_count = await analysis_service.get_questions_count()
+        if question_count < 10:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Insufficient questions for analysis. Found {question_count} questions, minimum 10 required."
+            )
+        
         # Validate request
         if request.mode not in ["sample", "all"]:
             raise HTTPException(status_code=400, detail="Mode must be 'sample' or 'all'")

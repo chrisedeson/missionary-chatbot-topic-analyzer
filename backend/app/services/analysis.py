@@ -87,7 +87,7 @@ class AnalysisService:
         """
         Execute the analysis pipeline in the background.
         """
-        db = next(get_db())
+        db = await get_db()
         
         try:
             logger.info(f"Executing analysis pipeline for run {run_id}")
@@ -126,7 +126,7 @@ class AnalysisService:
             # Step 3: Run hybrid analysis
             await update_progress('analysis_start', 15, 'Starting hybrid topic analysis...')
             
-            results = await self.analyzer.run_hybrid_analysis(
+            results = await self.analyzer.perform_hybrid_analysis(
                 questions=questions,
                 existing_topics=existing_topics,
                 progress_callback=update_progress
@@ -148,21 +148,64 @@ class AnalysisService:
             logger.info(f"Analysis run {run_id} completed successfully")
             
         except Exception as e:
-            logger.error(f"Error in analysis run {run_id}: {e}")
+            logger.error(f"Error in background analysis task: {e}")
             
-            # Update run status to failed
+            # Update the run status to failed
             if run_id in self.active_runs:
                 self.active_runs[run_id]['status'] = 'failed'
                 self.active_runs[run_id]['error'] = str(e)
-                self.active_runs[run_id]['failed_at'] = datetime.utcnow()
-            
-            # Update progress to show error
-            if progress_callback:
-                await progress_callback('error', 0, f'Analysis failed: {str(e)}')
-                
+                self.active_runs[run_id]['completed_at'] = datetime.utcnow().isoformat()
+        
         finally:
-            db.close()
+            # Clean up database connection
+            if 'db' in locals():
+                await db.disconnect()
     
+    async def get_questions_count(self) -> int:
+        """
+        Get the total number of questions available in Google Sheets.
+        """
+        try:
+            logger.info("Getting question count from Google Sheets")
+            
+            # Read questions from the configured Google Sheet
+            questions_df = google_sheets_service.read_questions_from_sheet(
+                sheet_id=self.settings.QUESTIONS_SHEET_ID
+            )
+            
+            if questions_df.empty:
+                logger.warning("No questions found in Google Sheets")
+                return 0
+            
+            # Look for the question column (case-insensitive)
+            question_column = None
+            for col in questions_df.columns:
+                if col.lower().strip() in ['question', 'questions']:
+                    question_column = col
+                    break
+            
+            if question_column is None:
+                # If no exact match, look for columns containing 'question'
+                for col in questions_df.columns:
+                    if 'question' in col.lower():
+                        question_column = col
+                        break
+            
+            if question_column is None:
+                logger.warning("No question column found in Google Sheets")
+                return 0
+            
+            # Count non-empty questions
+            all_questions = questions_df[question_column].dropna().astype(str).tolist()
+            valid_questions = [q.strip() for q in all_questions if q.strip() and q.strip().lower() != 'question']
+            
+            logger.info(f"Found {len(valid_questions)} valid questions in Google Sheets")
+            return len(valid_questions)
+                
+        except Exception as e:
+            logger.error(f"Error getting question count from Google Sheets: {e}")
+            return 0
+
     async def _load_questions(
         self, 
         db, 
