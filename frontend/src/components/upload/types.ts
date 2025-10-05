@@ -15,9 +15,13 @@ export interface UploadDialogProps {
 export interface ProcessingResult {
   status: string;
   statistics?: {
-    valid_questions_extracted: number;
     total_rows_processed: number;
-    [key: string]: any;
+    questions_before_deduplication: number;
+    duplicates_removed: number;
+    valid_questions_extracted: number;
+    kwargs_rows_processed: number;
+    cleaning_errors: number;
+    success_rate: number;
   };
   database?: {
     write_successful: boolean;
