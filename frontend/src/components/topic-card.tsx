@@ -1,6 +1,6 @@
 "use client";
 
-import { Hash, Users, TrendingUp } from "lucide-react";
+// Topic card component
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";

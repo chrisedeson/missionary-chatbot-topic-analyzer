@@ -19,7 +19,7 @@ interface DashboardProps {
 
 export function Dashboard({ isDeveloper }: DashboardProps) {
   const [showUpload, setShowUpload] = useState(false);
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [, setActiveRunId] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<AnalysisRun | null>(null);
   const [lastProcessingResult, setLastProcessingResult] = useState<any>(null);
 
