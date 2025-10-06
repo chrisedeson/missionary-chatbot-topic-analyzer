@@ -49,6 +49,25 @@ class AnalysisService:
         
         logger.info(f"Starting analysis run {run_id} (mode: {mode})")
         
+        # Create analysis run in database
+        db = await get_db()
+        try:
+            await db.analysisrun.create(
+                data={
+                    'id': run_id,
+                    'status': 'running',
+                    'progress': 0,
+                    'message': 'Starting analysis...',
+                    'mode': mode,
+                    'sampleSize': sample_size,
+                    'startedAt': datetime.utcnow()
+                }
+            )
+            logger.info(f"✅ Created analysis run {run_id} in database")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not create analysis run in database: {e}")
+            logger.info("📝 Continuing with in-memory storage only")
+        
         # Create run record in memory (no database for now to avoid coroutine issues)
         run_data = {
             'id': run_id,
@@ -101,6 +120,18 @@ class AnalysisService:
                         'message': message,
                         'timestamp': datetime.utcnow().isoformat()
                     }
+                
+                # Update database progress
+                try:
+                    await db.analysisrun.update(
+                        where={'id': run_id},
+                        data={
+                            'progress': int(progress),
+                            'message': f"{stage}: {message}"
+                        }
+                    )
+                except Exception as e:
+                    logger.debug(f"Could not update database progress: {e}")
                 
                 # Call external progress callback if provided
                 if progress_callback:
@@ -506,6 +537,9 @@ class AnalysisService:
                     # Save new topics discovered
                     await self._save_topics_to_db(db, run_id, results)
                     
+                    # Save embeddings to cache
+                    await self._save_embeddings_to_cache(db, results)
+                    
                     logger.info(f"✅ Successfully saved analysis results to database for run {run_id}")
                     
                 except Exception as db_error:
@@ -536,14 +570,34 @@ class AnalysisService:
     async def _update_analysis_run_in_db(self, db, run_id: str, results: Dict[str, Any]):
         """Update analysis run record in database with results"""
         try:
-            # This would update the AnalysisRun record with final results
-            # For now, just log what would be saved
             similar_count = len(results.get('similar_questions', {}).get('questions', []))
             new_topics_count = len(results.get('new_topics', {}).get('topics', []))
+            total_questions = results.get('total_questions_analyzed', 0)
             
-            logger.info(f"Would update AnalysisRun {run_id} in database:")
-            logger.info(f"  - Status: completed")
-            logger.info(f"  - Total questions: {results.get('total_questions_analyzed', 0)}")
+            # Normalize completedAt to Python datetime
+            completed_at = results.get('completed_at')
+            if isinstance(completed_at, str):
+                try:
+                    completed_at = datetime.fromisoformat(completed_at.replace('Z', '+00:00'))
+                except Exception:
+                    completed_at = datetime.utcnow()
+            elif not isinstance(completed_at, datetime):
+                completed_at = datetime.utcnow()
+            
+            await db.analysisrun.update(
+                where={'id': run_id},
+                data={
+                    'status': 'completed',
+                    'progress': 100,
+                    'totalQuestions': total_questions,
+                    'similarQuestions': similar_count,
+                    'newTopicsDiscovered': new_topics_count,
+                    'completedAt': completed_at
+                }
+            )
+            
+            logger.info(f"✅ Updated AnalysisRun {run_id} in database")
+            logger.info(f"  - Total questions: {total_questions}")
             logger.info(f"  - Similar questions: {similar_count}")
             logger.info(f"  - New topics discovered: {new_topics_count}")
             
@@ -555,27 +609,82 @@ class AnalysisService:
         """Save questions with embeddings and classifications to database"""
         try:
             similar_questions = results.get('similar_questions', {}).get('questions', [])
+            new_topics_data = results.get('new_topics', {}).get('topics', [])
+            
+            saved_count = 0
             
             # Save similar questions (those matching existing topics)
             for sq in similar_questions:
-                logger.info(f"Would save question to DB:")
-                logger.info(f"  - Question: {sq['question'][:50]}...")
-                logger.info(f"  - Matched topic: {sq.get('matched_topic', 'Unknown')}")
-                logger.info(f"  - Similarity score: {sq.get('similarity_score', 0):.3f}")
-                logger.info(f"  - Analysis run: {run_id}")
-                # Would save to questions table with embedding
-                
-            # Save questions from new topic clusters
-            new_topics_data = results.get('new_topics', {}).get('topics', [])
-            for topic_data in new_topics_data:
-                for question in topic_data.get('questions', []):
-                    logger.info(f"Would save clustered question to DB:")
-                    logger.info(f"  - Question: {question[:50]}...")
-                    logger.info(f"  - New topic: {topic_data.get('topic_name', 'Unknown')}")
-                    logger.info(f"  - Cluster ID: {topic_data.get('cluster_id', -1)}")
-                    logger.info(f"  - Analysis run: {run_id}")
-                    # Would save to questions table with embedding and topic assignment
+                try:
+                    # Normalize embedding to list of floats
+                    embedding = sq.get('embedding', [])
+                    if embedding:
+                        embedding = [float(x) for x in embedding]
                     
+                    # Find the existing topic by name
+                    matched_topic_name = sq.get('matched_topic', '')
+                    existing_topic = None
+                    if matched_topic_name:
+                        existing_topic = await db.topic.find_first(
+                            where={'name': matched_topic_name}
+                        )
+                    
+                    # Create question record
+                    question_data = {
+                        'text': sq['question'],
+                        'embedding': embedding,
+                        'similarityScore': float(sq.get('similarity_score', 0)),
+                        'matchedTopic': matched_topic_name,
+                        'isNewTopic': False,
+                        'analysisRunId': run_id
+                    }
+                    
+                    if existing_topic:
+                        question_data['topicId'] = existing_topic.id
+                    
+                    await db.question.create(data=question_data)
+                    saved_count += 1
+                    
+                except Exception as e:
+                    logger.debug(f"Error saving similar question: {e}")
+                    continue
+            
+            # Save questions from new topic clusters
+            for topic_data in new_topics_data:
+                topic_name = topic_data.get('topic_name', f"Cluster {topic_data.get('cluster_id', 'Unknown')}")
+                
+                # Find the topic (should be created by _save_topics_to_db)
+                topic = await db.topic.find_first(where={'name': topic_name})
+                
+                # Get question embeddings if available
+                question_embeddings = topic_data.get('question_embeddings', {})
+                
+                for question_text in topic_data.get('questions', []):
+                    try:
+                        # Get embedding for this specific question
+                        embedding = question_embeddings.get(question_text, [])
+                        if embedding:
+                            embedding = [float(x) for x in embedding]
+                        
+                        question_data = {
+                            'text': question_text,
+                            'embedding': embedding,
+                            'isNewTopic': True,
+                            'analysisRunId': run_id
+                        }
+                        
+                        if topic:
+                            question_data['topicId'] = topic.id
+                        
+                        await db.question.create(data=question_data)
+                        saved_count += 1
+                        
+                    except Exception as e:
+                        logger.debug(f"Error saving clustered question: {e}")
+                        continue
+            
+            logger.info(f"✅ Saved {saved_count} questions to database")
+            
         except Exception as e:
             logger.error(f"Error saving questions to database: {e}")
             raise
@@ -588,19 +697,99 @@ class AnalysisService:
             for topic_data in new_topics_data:
                 topic_name = topic_data.get('topic_name', f"Cluster {topic_data.get('cluster_id', 'Unknown')}")
                 rep_question = topic_data.get('representative_question', '')
-                question_count = topic_data.get('question_count', 0)
+                rep_embedding = topic_data.get('representative_embedding', [])
                 
-                logger.info(f"Would save new topic to DB:")
-                logger.info(f"  - Name: {topic_name}")
-                logger.info(f"  - Representative question: {rep_question[:50]}...")
-                logger.info(f"  - Question count: {question_count}")
-                logger.info(f"  - Discovery run: {run_id}")
-                logger.info(f"  - Status: pending (awaiting Elder Edwards approval)")
-                # Would save to topics table with representative embedding
+                # Normalize representative embedding to list of floats
+                if rep_embedding:
+                    try:
+                        rep_embedding = [float(x) for x in rep_embedding]
+                    except Exception:
+                        rep_embedding = []
                 
+                # Check if topic already exists
+                existing_topic = await db.topic.find_first(where={'name': topic_name})
+                
+                if not existing_topic:
+                    # Create new topic
+                    await db.topic.create(
+                        data={
+                            'name': topic_name,
+                            'representativeQuestion': rep_question,
+                            'representativeEmbedding': rep_embedding,
+                            'isDiscovered': True,
+                            'approvalStatus': 'pending',
+                            'discoveredAt': datetime.utcnow()
+                        }
+                    )
+                    logger.info(f"✅ Created new topic: {topic_name}")
+                else:
+                    logger.info(f"ℹ️ Topic already exists: {topic_name}")
+            
+            logger.info(f"✅ Processed {len(new_topics_data)} topics")
+            
         except Exception as e:
             logger.error(f"Error saving topics to database: {e}")
             raise
+
+    async def _save_embeddings_to_cache(self, db, results: Dict[str, Any]):
+        """Save embeddings to cache for future use"""
+        try:
+            # Extract all questions and their embeddings from results
+            all_questions = []
+            
+            # Similar questions
+            similar_questions = results.get('similar_questions', {}).get('questions', [])
+            for sq in similar_questions:
+                if 'question' in sq and 'embedding' in sq and sq['embedding']:
+                    all_questions.append({
+                        'text': sq['question'],
+                        'embedding': sq['embedding']
+                    })
+            
+            # New topic questions
+            new_topics_data = results.get('new_topics', {}).get('topics', [])
+            for topic_data in new_topics_data:
+                question_embeddings = topic_data.get('question_embeddings', {})
+                for question_text, embedding in question_embeddings.items():
+                    if embedding:
+                        all_questions.append({
+                            'text': question_text,
+                            'embedding': embedding
+                        })
+            
+            # Save to embedding cache
+            cached_count = 0
+            for q_data in all_questions:
+                try:
+                    text_hash = hashlib.md5(q_data['text'].encode()).hexdigest()[:12]
+                    
+                    # Check if already cached
+                    existing_cache = await db.embeddingcache.find_first(
+                        where={'textHash': text_hash, 'model': self.analyzer.embedding_model}
+                    )
+                    
+                    if not existing_cache:
+                        # Normalize embedding to list of floats
+                        embedding = [float(x) for x in q_data['embedding']]
+                        
+                        await db.embeddingcache.create(
+                            data={
+                                'textHash': text_hash,
+                                'model': self.analyzer.embedding_model,
+                                'embedding': embedding
+                            }
+                        )
+                        cached_count += 1
+                    
+                except Exception as e:
+                    logger.debug(f"Error caching embedding: {e}")
+                    continue
+            
+            logger.info(f"✅ Cached {cached_count} new embeddings")
+            
+        except Exception as e:
+            logger.error(f"Error saving embeddings to cache: {e}")
+            # Don't raise - caching failures shouldn't break the analysis
 
 # Global instance
 analysis_service = AnalysisService()
