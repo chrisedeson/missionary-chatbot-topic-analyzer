@@ -1,53 +1,65 @@
-# BYU Pathway Missionary Chatbot Topic Analyzer
+# BYU Pathway Topic Analyzer
 
-A modern dashboard application for analyzing and managing student chatbot questions with hybrid topic discovery and classification.
+AI-powered topic discovery and classification system for missionary questions using hybrid clustering and LLM analysis.
 
-## 🚀 Features
+## Quick Start
 
-### Public Dashboard
-- Interactive analytics with charts and filters
-- Time-based filters (daily, weekly, monthly, custom ranges)
-- Geographic filters (country, state) 
-- Topic-based filtering and similarity score ranges
-- Central interactive table with CSV export
-- Recent insights and metrics display
-
-### Developer Tools (Password Protected)
-- Questions CSV upload with data cleaning and validation
-- Google Sheets synchronization
-- Hybrid analysis pipeline (similarity + clustering)
-- Database management with confirmation dialogs
-- Real-time progress monitoring via Server-Sent Events
-- Analysis history and results management
-
-## 🏗️ Architecture
-
-- **Frontend**: Next.js 15 with TypeScript, Tailwind CSS v4, shadcn/ui
-- **Backend**: FastAPI with Python, async job processing
-- **Database**: PostgreSQL with pgvector extension (Neon)
-- **ORM**: Prisma for database operations
-- **Queue**: Redis + RQ for background jobs
-- **Auth**: Simple password-based developer authentication
-
-## 📋 Prerequisites
-
-- Node.js 18+ and pnpm
-- Python 3.11+
-- PostgreSQL with pgvector extension
-- Redis (for background jobs)
+### Prerequisites
+- Python 3.9+
+- Node.js 18+
+- PostgreSQL database
 - OpenAI API key
-- Google Service Account (for Sheets integration)
+- Google Service Account credentials
 
-## 🛠️ Quick Start
-
-### 1. Clone and Setup
+### Backend Setup
 
 ```bash
-git clone <repository-url>
-cd missionary-chatbot-topic-analyzer
+cd backend
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.template .env
+# Edit .env with your actual configuration values
+make dev
 ```
 
-### 2. Backend Setup
+### Frontend Setup
+
+```bash
+cd frontend
+npm install
+cp .env.template .env.local
+# Edit .env.local with your backend URL
+npm run dev
+```
+
+### Database Setup
+
+```bash
+cd backend
+npx prisma generate
+npx prisma db push
+```
+
+## Configuration
+
+Key environment variables (see `.env.template` files):
+
+- `DATABASE_URL`: PostgreSQL connection string
+- `OPENAI_API_KEY`: OpenAI API key
+- `GOOGLE_SERVICE_ACCOUNT_*`: Google Sheets access credentials
+- `QUESTIONS_SHEET_ID`: Google Sheet ID containing questions
+
+## Usage
+
+1. Upload questions via CSV or connect Google Sheets
+2. Run analysis to discover topics using UMAP + HDBSCAN clustering
+3. Review and approve discovered topics
+4. Export results
+
+## Deployment
+
+Set `DEBUG=false` in production and ensure all sensitive environment variables are properly configured.
 
 ```bash
 cd backend

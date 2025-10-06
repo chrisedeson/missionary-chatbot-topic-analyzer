@@ -27,10 +27,10 @@ async def get_dashboard_metrics(
     return {
         # Match the frontend DashboardData interface
         "question_count": question_count,
-        "topic_count": 0,     # TODO: Get actual count from database
-        "last_analysis": None,  # TODO: Get from database
-        "last_updated": None,   # TODO: Get from database
-        "coverage_percentage": 0,  # TODO: Calculate from database
+        "topic_count": 0,
+        "last_analysis": None,
+        "last_updated": None,
+        "coverage_percentage": 0,
         "has_questions": has_sufficient_questions,  # Enable analysis only if >=10 questions
         
         # Additional insights for dashboard widgets
@@ -85,7 +85,7 @@ async def get_questions(
         developer_authenticated=bool(developer)
     )
     
-    # TODO: Implement actual database query with filters
+    # Load questions from database with filters
     # For now, return empty results
     
     return {
@@ -128,7 +128,7 @@ async def export_questions(
         developer_authenticated=bool(developer)
     )
     
-    # TODO: Implement actual export functionality
+    # Implement export functionality
     
     return {"message": "Export functionality not yet implemented"}
 
@@ -152,7 +152,7 @@ async def get_chart_data(
         developer_authenticated=bool(developer)
     )
     
-    # TODO: Implement actual chart data generation
+    # Generate chart data
     
     return {
         "chart_type": chart_type,

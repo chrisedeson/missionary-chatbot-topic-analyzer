@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     
     # Security
-    DEV_PASSWORD: str = "pathway2024"  # Default dev password
-    SECRET_KEY: str = "your-secret-key-change-in-production"
+    DEV_PASSWORD: str
+    SECRET_KEY: str
     
     # CORS and Security
     ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
