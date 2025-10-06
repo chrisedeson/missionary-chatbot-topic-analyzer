@@ -29,7 +29,7 @@ export function truncateText(text: string, maxLength: number): string {
   return text.slice(0, maxLength) + '...'
 }
 
-export function downloadCSV(data: Record<string, unknown>[], filename: string) {
+export function downloadCSV(data: any[], filename: string) {
   const headers = Object.keys(data[0] || {})
   const csvContent = [
     headers.join(','),

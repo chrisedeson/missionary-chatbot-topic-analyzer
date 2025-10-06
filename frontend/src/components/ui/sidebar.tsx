@@ -41,7 +41,7 @@ const Sidebar = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
 >(({ className, children, ...props }, ref) => {
-  const { _isOpen } = React.useContext(SidebarContext);
+  const { isOpen } = React.useContext(SidebarContext);
 
   return (
     <div
@@ -164,7 +164,7 @@ const SidebarMenuButton = React.forwardRef<
     asChild?: boolean;
     isActive?: boolean;
   }
->(({ className, asChild: _asChild = false, isActive = false, children, ...props }, ref) => {
+>(({ className, asChild = false, isActive = false, children, ...props }, ref) => {
   return (
     <div
       ref={ref}

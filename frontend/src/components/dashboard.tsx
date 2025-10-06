@@ -11,8 +11,7 @@ import { AnalysisResults } from "@/components/analysis-results";
 import { UploadDialog } from "./upload";
 import { ProgressTracker } from "@/components/progress-tracker";
 import { apiClient } from "@/lib/api";
-import type { AnalysisRun } from "@/lib/types";
-import type { ProcessingResult } from "@/components/upload/types";
+import type { DashboardData, AnalysisRun } from "@/lib/types";
 
 interface DashboardProps {
   isDeveloper: boolean;
@@ -20,9 +19,9 @@ interface DashboardProps {
 
 export function Dashboard({ isDeveloper }: DashboardProps) {
   const [showUpload, setShowUpload] = useState(false);
-  const [, _setActiveRunId] = useState<string | null>(null);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<AnalysisRun | null>(null);
-  const [lastProcessingResult, setLastProcessingResult] = useState<ProcessingResult | null>(null);
+  const [lastProcessingResult, setLastProcessingResult] = useState<any>(null);
 
   // Fetch dashboard data
   const { data: dashboardData, refetch: refetchDashboard, isLoading } = useQuery({
@@ -38,7 +37,7 @@ export function Dashboard({ isDeveloper }: DashboardProps) {
     refetchInterval: 10000, // Refresh every 10 seconds
   });
 
-  const handleUploadSuccess = (processingResult: ProcessingResult) => {
+  const handleUploadSuccess = (processingResult: any) => {
     setLastProcessingResult(processingResult);
     refetchDashboard();
   };
@@ -234,7 +233,7 @@ export function Dashboard({ isDeveloper }: DashboardProps) {
                     <BarChart3 className="w-12 h-12 mx-auto mb-4 opacity-50" />
                     <p>No analysis results yet</p>
                     {isDeveloper && (
-                      <p className="text-sm mt-2">Click &quot;Start Analysis&quot; to begin</p>
+                      <p className="text-sm mt-2">Click "Start Analysis" to begin</p>
                     )}
                   </div>
                 )}

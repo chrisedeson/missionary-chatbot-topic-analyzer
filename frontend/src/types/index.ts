@@ -70,7 +70,7 @@ export interface DashboardMetrics {
 export interface ChartData {
   chart_type: string
   time_range: string
-  data: unknown[]
+  data: any[]
   message?: string
 }
 
