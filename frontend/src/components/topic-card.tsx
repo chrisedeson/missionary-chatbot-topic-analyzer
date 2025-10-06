@@ -4,6 +4,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Users, TrendingUp } from "lucide-react";
 import type { Topic } from "@/lib/types";
 
 interface TopicCardProps {

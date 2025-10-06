@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { apiClient } from "@/lib/api";
-import type { UploadResponse, ProcessingResult } from './types'
+import type { ProcessingResult } from './types'
 
 export function useUpload(onSuccess: (result: ProcessingResult) => void) {
   const [state, setState] = useState<UploadState>({

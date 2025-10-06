@@ -80,7 +80,7 @@ export class AuthManager {
       }
       
       this.notify()
-    } catch (error) {
+    } catch (_error) {
       // Even if logout fails on server, clear local state
       this.state = {
         isAuthenticated: false,

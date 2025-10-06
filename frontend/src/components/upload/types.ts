@@ -9,7 +9,7 @@ export interface ProcessingProgress {
 export interface UploadDialogProps {
   open: boolean;
   onClose: () => void;
-  onSuccess: (processingResult: any) => void;
+  onSuccess: (processingResult: ProcessingResult) => void;
 }
 
 export interface ProcessingResult {
