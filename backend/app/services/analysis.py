@@ -1,5 +1,21 @@
 # backend/app/services/analysis.py
 
+"""
+Hybrid Topic Discovery and Classification System
+
+This implements the EXACT algorithm from hybrid_topic_discovery_and_classification.py
+with database integration for the missionary chatbot topic analyzer.
+
+EXACT CONFIGURATION FROM REFERENCE (DO NOT CHANGE):
+- Similarity threshold: 0.70
+- GPT model: gpt-5-nano
+- Embedding model: text-embedding-3-small  
+- UMAP components: 5
+- HDBSCAN min cluster size: 3
+- Random seed: 42
+- Representative question method: centroid
+"""
+
 import asyncio
 import hashlib
 import logging
@@ -11,22 +27,43 @@ from scipy.spatial.distance import cosine
 import backoff
 from openai import OpenAI, AsyncOpenAI, APIStatusError
 
+# ML imports - EXACT from reference
+try:
+    from umap import UMAP
+    from hdbscan import HDBSCAN
+    from bertopic import BERTopic
+except ImportError as e:
+    logging.warning(f"ML dependencies not available: {e}. Install with: pip install umap-learn hdbscan bertopic")
+
 from app.core.database import db as prisma
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Configuration
+# ====================================================================
+# EXACT CONFIGURATION FROM REFERENCE (DO NOT CHANGE)
+# ====================================================================
+
+SIMILARITY_THRESHOLD = 0.70  # Minimum similarity to match existing topics
+REPRESENTATIVE_QUESTION_METHOD = "centroid"  # Options: "centroid" or "frequent"
+
+# OpenAI and GPT settings
 EMBEDDING_MODEL = "text-embedding-3-small"
-EMBEDDING_DIMENSIONS = 1536
-GPT_MODEL = "gpt-4"  # Using GPT-4 as GPT-5 isn't available yet
-SIMILARITY_THRESHOLD = 0.70
+EMBEDDING_DIMENSIONS = 1536  # Default for text-embedding-3-small
+GPT_MODEL = "gpt-5-nano"  # Options: "gpt-5-nano" or "gpt-5-mini"
+
+# Clustering settings
+UMAP_N_COMPONENTS = 5
+HDBSCAN_MIN_CLUSTER_SIZE = 3  # Tighter clusters
+RANDOM_SEED = 42
+
+# Batch processing
 BATCH_SIZE = 100  # Batch size for embedding generation
-CLUSTERING_BATCH_SIZE = 1000
 
 # Initialize OpenAI clients
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
 async_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
 
 class EmbeddingService:
     """Service for handling embeddings with database caching"""
@@ -35,6 +72,20 @@ class EmbeddingService:
     def _hash_text(text: str) -> str:
         """Generate MD5 hash of text for cache key"""
         return hashlib.md5(text.encode()).hexdigest()
+    
+    @staticmethod
+    def clean_question(question: str) -> str:
+        """
+        Remove ACM question prefix from questions before processing.
+        EXACT from reference file.
+        """
+        if not isinstance(question, str):
+            return str(question) if question is not None else ""
+        
+        import re
+        pattern = r'^\s*\(ACMs?\s+[Qq]uestion\)\s*:?\s*'
+        cleaned = re.sub(pattern, '', question, flags=re.IGNORECASE).strip()
+        return cleaned if cleaned else question
     
     @staticmethod
     async def get_cached_embedding(text: str, model: str = EMBEDDING_MODEL) -> Optional[List[float]]:
@@ -77,19 +128,11 @@ class EmbeddingService:
         )
     
     @staticmethod
-    def clean_question(question: str) -> str:
-        """Remove ACM question prefix from questions before processing"""
-        if not isinstance(question, str):
-            return str(question) if question is not None else ""
-        
-        import re
-        pattern = r'^\s*\(ACMs?\s+[Qq]uestion\)\s*:?\s*'
-        cleaned = re.sub(pattern, '', question, flags=re.IGNORECASE).strip()
-        return cleaned if cleaned else question
-    
-    @staticmethod
     async def get_embedding(text: str, model: str = EMBEDDING_MODEL) -> List[float]:
-        """Get embedding for text with database caching support"""
+        """
+        Get embedding for text with database caching support.
+        EXACT from reference file.
+        """
         cleaned_text = EmbeddingService.clean_question(text)
         
         # Try to load from cache first
@@ -117,7 +160,10 @@ class EmbeddingService:
     
     @staticmethod
     async def get_embeddings_batch(texts: List[str], model: str = EMBEDDING_MODEL) -> List[List[float]]:
-        """Get embeddings for multiple texts with true batch processing and database caching"""
+        """
+        Get embeddings for multiple texts with batch processing and database caching.
+        EXACT from reference file.
+        """
         cleaned_texts = [EmbeddingService.clean_question(text) for text in texts]
         embeddings = []
         cache_hits = 0
@@ -183,21 +229,56 @@ class EmbeddingService:
         logger.info(f"Embedding generation complete: {cache_hits} cache hits, {api_calls} API calls")
         return embeddings
 
+
+class GPT5Config:
+    """
+    Configuration for GPT-5 models with proper parameter handling.
+    EXACT from reference file.
+    """
+    
+    def __init__(self, model: str = GPT_MODEL):
+        self.MODEL = model
+        self.MAX_COMPLETION_TOKENS = 1000
+        self.TEMPERATURE = 1  # GPT-5 requires temperature = 1
+        self.MAX_RETRIES = 3
+    
+    def get_api_params(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+        """Get API parameters for GPT-5 models"""
+        params = {
+            "model": self.MODEL,
+            "messages": messages,
+            "max_completion_tokens": self.MAX_COMPLETION_TOKENS,
+        }
+        # Only add temperature if it's not the default
+        if self.TEMPERATURE != 1:
+            params["temperature"] = self.TEMPERATURE
+        return params
+
+
+# Initialize GPT-5 configuration
+gpt5_config = GPT5Config(GPT_MODEL)
+
+
 class AnalysisService:
-    """Main analysis service implementing hybrid topic discovery"""
+    """
+    Main analysis service implementing hybrid topic discovery.
+    EXACT algorithm from reference file.
+    """
     
     def __init__(self):
         self.embedding_service = EmbeddingService()
         self.active_runs = {}  # Track active analysis runs
     
     async def find_best_topic_match(self, question_embedding: List[float]) -> Optional[Dict]:
-        """Find the best matching topic for a question embedding using cosine similarity"""
+        """
+        Find the best matching topic for a question embedding using cosine similarity.
+        EXACT from reference file.
+        """
         if not question_embedding or len(question_embedding) != EMBEDDING_DIMENSIONS:
             logger.error(f"Invalid question embedding dimension")
             return None
         
         # Get all topics with their representative embeddings
-        # Note: Cannot filter array fields with "not None" in Prisma Python, so we filter in code
         topics = await prisma.topic.find_many()
         
         best_distance = float('inf')
@@ -207,7 +288,7 @@ class AnalysisService:
             # Skip topics without embeddings or with empty embeddings
             if not topic.representativeEmbedding or len(topic.representativeEmbedding) == 0:
                 continue
-                
+            
             if len(topic.representativeEmbedding) != EMBEDDING_DIMENSIONS:
                 logger.warning(f"Invalid embedding dimension for topic {topic.name}")
                 continue
@@ -230,9 +311,13 @@ class AnalysisService:
         
         return best_match
     
-    async def classify_by_similarity(self, questions: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
-        """Classify questions by similarity to existing topics"""
+    async def classify_by_similarity(self, questions: List[Dict], threshold: float = SIMILARITY_THRESHOLD) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Classify questions by similarity to existing topics.
+        EXACT from reference file - Step 1: Similarity Filtering.
+        """
         logger.info(f"Starting similarity-based classification for {len(questions)} questions")
+        logger.info(f"Similarity threshold: {threshold}")
         
         # Extract question texts
         question_texts = [q['text'] for q in questions]
@@ -247,7 +332,7 @@ class AnalysisService:
             if embedding and len(embedding) == EMBEDDING_DIMENSIONS:
                 best_match = await self.find_best_topic_match(embedding)
                 
-                if best_match and best_match['similarity'] >= SIMILARITY_THRESHOLD:
+                if best_match and best_match['similarity'] >= threshold:
                     similar_questions.append({
                         **question,
                         'embedding': embedding,
@@ -257,12 +342,14 @@ class AnalysisService:
                         'similarity_score': best_match['similarity'],
                         'is_new_topic': False
                     })
+                    logger.debug(f"Matched question to topic: {best_match['topic_name']} (similarity: {best_match['similarity']:.3f})")
                 else:
                     remaining_questions.append({
                         **question,
                         'embedding': embedding,
                         'is_new_topic': True
                     })
+                    logger.debug(f"Question needs clustering: {question['text'][:50]}...")
             else:
                 logger.warning(f"Invalid embedding for question: {question['text'][:50]}...")
                 remaining_questions.append({
@@ -272,6 +359,7 @@ class AnalysisService:
                 })
         
         logger.info(f"Similarity classification complete: {len(similar_questions)} similar, {len(remaining_questions)} remaining")
+        
         return similar_questions, remaining_questions
     
     async def save_classification_results(self, similar_questions: List[Dict], remaining_questions: List[Dict], analysis_run_id: str):
@@ -304,108 +392,210 @@ class AnalysisService:
     @backoff.on_exception(
         backoff.expo,
         (APIStatusError, asyncio.TimeoutError),
-        max_tries=3
+        max_tries=gpt5_config.MAX_RETRIES,
+        base=2,
+        max_value=60
     )
-    async def generate_topic_name(self, questions: List[str], keywords: str) -> str:
-        """Generate a topic name using GPT"""
+    async def generate_topic_name_gpt5(self, questions: List[str], keywords: str) -> str:
+        """
+        Generate a topic name using GPT-5 with retry logic.
+        EXACT PROMPT from reference file - DO NOT CHANGE A SINGLE LETTER.
+        """
+        # Limit to top 10 questions for context
         sample_questions = questions[:10]
         questions_text = "\n".join([f"- {q}" for q in sample_questions])
         
         prompt = f"""
-        Based on the following student questions and keywords, generate a concise, descriptive topic name.
+    Based on the following student questions and keywords, generate a concise, descriptive topic name.
 
-        QUESTIONS:
-        {questions_text}
+QUESTIONS:
+{questions_text}
 
-        KEYWORDS: {keywords}
+KEYWORDS: {keywords}
 
-        Instructions:
-        - Your answer must be ONLY the topic name (2–8 words), no extra text.
-        - It should clearly describe the shared theme of the questions.
-        - Avoid generic labels like "General Questions" or "Miscellaneous."
-        - Do not include "Topic name:" or quotation marks.
-        - Use simple, natural English that sounds clear to a student or teacher.
+Instructions:
+- Your answer must be ONLY the topic name (2–8 words), no extra text.
+- It should clearly describe the shared theme of the questions.
+- Avoid generic labels like "General Questions" or "Miscellaneous."
+- Do not include "Topic name:" or quotation marks.
+- Use simple, natural English that sounds clear to a student or teacher.
 
-        Now generate the topic name for the questions above:
-        """
+Example:
+Questions:
+- When does registration open?
+- What are the fall 2025 enrollment deadlines?
+Keywords: registration, deadlines
+
+Topic name: Fall 2025 Registration Deadlines
+
+Now generate the topic name for the questions above:
+"""
         
         try:
-            response = await async_client.chat.completions.create(
-                model=GPT_MODEL,
-                messages=[
-                    {"role": "system", "content": "You are an expert at creating clear, descriptive topic names for student question categories."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=50
-            )
+            messages = [
+                {"role": "system", "content": "You are an expert at creating clear, descriptive topic names for student question categories."},
+                {"role": "user", "content": prompt}
+            ]
+            
+            api_params = gpt5_config.get_api_params(messages)
+            response = await async_client.chat.completions.create(**api_params)
             
             topic_name = response.choices[0].message.content.strip()
+            
+            # Clean up the response
             topic_name = topic_name.replace("Topic name:", "").strip()
             topic_name = topic_name.strip('"\'')
             
+            # Validate and limit length
             if len(topic_name) > 100 or len(topic_name) < 3:
-                return f"Topic: {keywords[:50]}"
-                
+                raise ValueError(f"Invalid topic name length: {topic_name}")
+            
             return topic_name
             
         except Exception as e:
-            logger.warning(f"GPT topic naming failed: {e}")
+            logger.warning(f"GPT-5 topic naming failed: {e}")
+            # Fallback to keyword-based name
             return f"Topic: {keywords[:50]}"
     
+    def select_representative_question(self, cluster_questions: List[Dict], method: str = REPRESENTATIVE_QUESTION_METHOD) -> Tuple[str, List[float]]:
+        """
+        Select representative question for a cluster.
+        EXACT from reference file.
+        """
+        questions = [q['question'] for q in cluster_questions]
+        
+        if method == "centroid":
+            # Find question closest to cluster centroid
+            embeddings = np.array([q['embedding'] for q in cluster_questions])
+            centroid = np.mean(embeddings, axis=0)
+            
+            # Calculate distances to centroid
+            distances = [cosine(emb, centroid) for emb in embeddings]
+            closest_idx = np.argmin(distances)
+            
+            return questions[closest_idx], embeddings[closest_idx].tolist()
+        
+        elif method == "frequent":
+            # Select shortest question as proxy for most common pattern
+            shortest_idx = min(range(len(questions)), key=lambda i: len(questions[i]))
+            return questions[shortest_idx], cluster_questions[shortest_idx]['embedding']
+        
+        else:
+            # Default to first question
+            return questions[0], cluster_questions[0]['embedding']
+    
     async def discover_new_topics(self, remaining_questions: List[Dict]) -> List[Dict]:
-        """Discover new topics from remaining questions using clustering"""
+        """
+        Discover new topics from remaining questions using clustering.
+        EXACT from reference file - Step 2: Clustering-Based Topic Discovery.
+        """
         if not remaining_questions:
             return []
         
         logger.info(f"Starting topic discovery for {len(remaining_questions)} questions")
+        logger.info(f"UMAP n_components: {UMAP_N_COMPONENTS}, HDBSCAN min_cluster_size: {HDBSCAN_MIN_CLUSTER_SIZE}")
         
-        # Extract embeddings for clustering
+        # Extract embeddings and questions
+        questions = [q['text'] for q in remaining_questions]
         embeddings = np.array([q['embedding'] for q in remaining_questions])
         
-        # Simple clustering implementation - in production you might use HDBSCAN or similar
-        from sklearn.cluster import DBSCAN
-        from sklearn.metrics.pairwise import cosine_similarity
+        logger.info(f"Embeddings shape: {embeddings.shape}")
         
-        # Use DBSCAN for clustering
-        clustering = DBSCAN(eps=0.5, min_samples=3, metric='cosine').fit(embeddings)
-        cluster_labels = clustering.labels_
+        # Step 1: Dimensionality reduction with UMAP
+        logger.info(f"Reducing dimensions: {embeddings.shape[1]} → {UMAP_N_COMPONENTS}")
+        umap_model = UMAP(
+            n_components=UMAP_N_COMPONENTS,
+            min_dist=0.0,
+            metric='cosine',
+            random_state=RANDOM_SEED
+        )
+        reduced_embeddings = umap_model.fit_transform(embeddings)
+        logger.info(f"UMAP reduction complete: {reduced_embeddings.shape}")
+        
+        # Step 2: Clustering with HDBSCAN
+        logger.info(f"Clustering with HDBSCAN (min_cluster_size: {HDBSCAN_MIN_CLUSTER_SIZE})")
+        hdbscan_model = HDBSCAN(
+            min_cluster_size=HDBSCAN_MIN_CLUSTER_SIZE,
+            metric="euclidean",
+            cluster_selection_method="eom"
+        )
+        clusters = hdbscan_model.fit_predict(reduced_embeddings)
+        
+        # Analyze clustering results
+        unique_clusters, counts = np.unique(clusters, return_counts=True)
+        n_clusters = len(unique_clusters[unique_clusters != -1])  # Exclude noise cluster (-1)
+        unclustered_count = counts[unique_clusters == -1][0] if -1 in unique_clusters else 0
+        clustered_count = len(clusters) - unclustered_count
+        
+        logger.info(f"Clustering complete!")
+        logger.info(f"Number of clusters found: {n_clusters}")
+        logger.info(f"Questions clustered: {clustered_count} ({clustered_count/len(questions)*100:.1f}%)")
+        logger.info(f"Questions not clustered (noise): {unclustered_count} ({unclustered_count/len(questions)*100:.1f}%)")
+        
+        if n_clusters == 0:
+            logger.warning("No clusters found - adjusting parameters might help")
+            return []
+        
+        # Step 3: BERTopic for topic extraction
+        logger.info("Running BERTopic for topic extraction...")
+        topic_model = BERTopic(
+            embedding_model=None,  # Use our precomputed embeddings
+            umap_model=umap_model,
+            hdbscan_model=hdbscan_model,
+            verbose=False
+        )
+        
+        topics, probabilities = topic_model.fit_transform(questions, embeddings)
+        topic_info = topic_model.get_topic_info()
+        logger.info(f"BERTopic analysis complete - {len(topic_info)-1} topics discovered")
         
         # Group questions by cluster
-        clusters = {}
-        for i, label in enumerate(cluster_labels):
-            if label == -1:  # Noise points
+        cluster_dict = {}
+        for i, cluster_id in enumerate(clusters):
+            if cluster_id == -1:  # Skip noise
                 continue
-            if label not in clusters:
-                clusters[label] = []
-            clusters[label].append(remaining_questions[i])
+            if cluster_id not in cluster_dict:
+                cluster_dict[cluster_id] = []
+            cluster_dict[cluster_id].append({
+                'question': questions[i],
+                'embedding': embeddings[i].tolist(),
+                'question_index': i,  # Track original index
+                **remaining_questions[i]
+            })
         
-        logger.info(f"Found {len(clusters)} clusters from {len(remaining_questions)} questions")
+        # Get topic keywords from BERTopic
+        topic_map = topic_info.set_index("Topic")["Representation"].to_dict()
         
-        # Generate topic names for each cluster
+        # Generate topic names and select representative questions
         new_topics = []
-        for cluster_id, cluster_questions in clusters.items():
+        from collections import Counter
+        
+        for cluster_id, cluster_questions in cluster_dict.items():
             if len(cluster_questions) < 3:  # Skip very small clusters
                 continue
-                
-            questions_text = [q['text'] for q in cluster_questions]
             
-            # Extract keywords (simplified - in production use proper keyword extraction)
-            all_text = ' '.join(questions_text)
-            words = all_text.lower().split()
-            from collections import Counter
-            common_words = [word for word, count in Counter(words).most_common(10) if len(word) > 3]
-            keywords = ', '.join(common_words[:5])
+            # Extract keywords from BERTopic or fallback to simple word frequency
+            topic_id = clusters[cluster_questions[0]['question_index']]
+            topic_rep = topic_map.get(topic_id, [])
             
-            # Generate topic name
-            topic_name = await self.generate_topic_name(questions_text, keywords)
+            if isinstance(topic_rep, list) and len(topic_rep) > 0:
+                keywords = ", ".join(topic_rep[:5])
+            else:
+                # Fallback: simple word frequency
+                all_text = ' '.join([q['question'] for q in cluster_questions])
+                words = all_text.lower().split()
+                common_words = [word for word, count in Counter(words).most_common(10) if len(word) > 3]
+                keywords = ', '.join(common_words[:5])
             
-            # Select representative question (closest to centroid)
-            cluster_embeddings = np.array([q['embedding'] for q in cluster_questions])
-            centroid = np.mean(cluster_embeddings, axis=0)
-            similarities = [cosine_similarity([emb], [centroid])[0][0] for emb in cluster_embeddings]
-            rep_question_idx = np.argmax(similarities)
-            representative_question = cluster_questions[rep_question_idx]['text']
-            representative_embedding = cluster_questions[rep_question_idx]['embedding']
+            # Generate topic name using GPT-5
+            questions_text = [q['question'] for q in cluster_questions]
+            topic_name = await self.generate_topic_name_gpt5(questions_text, keywords)
+            
+            # Select representative question
+            representative_question, representative_embedding = self.select_representative_question(
+                cluster_questions,
+                REPRESENTATIVE_QUESTION_METHOD
+            )
             
             new_topics.append({
                 'name': topic_name,
@@ -415,6 +605,7 @@ class AnalysisService:
                 'question_count': len(cluster_questions)
             })
         
+        logger.info(f"Topic discovery complete: {len(new_topics)} new topics created")
         return new_topics
     
     async def save_new_topics(self, new_topics: List[Dict], analysis_run_id: str):
@@ -438,7 +629,10 @@ class AnalysisService:
             )
     
     async def run_analysis(self, analysis_run_id: str, mode: str = "all", sample_size: Optional[int] = None):
-        """Run the complete hybrid analysis pipeline"""
+        """
+        Run the complete hybrid analysis pipeline.
+        EXACT workflow from reference file.
+        """
         try:
             # Update analysis run status
             await prisma.analysisrun.update(
@@ -451,7 +645,6 @@ class AnalysisService:
             )
             
             # Load questions based on mode
-            # Note: Allow re-analysis of all questions, not just unprocessed ones
             if mode == "sample" and sample_size:
                 questions = await prisma.question.find_many(
                     take=sample_size
@@ -487,7 +680,7 @@ class AnalysisService:
             await prisma.analysisrun.update(
                 where={"id": analysis_run_id},
                 data={
-                    "progress": 60,
+                    "progress": 50,
                     "message": "Saving classification results..."
                 }
             )
@@ -498,8 +691,8 @@ class AnalysisService:
             await prisma.analysisrun.update(
                 where={"id": analysis_run_id},
                 data={
-                    "progress": 70,
-                    "message": "Discovering new topics..."
+                    "progress": 60,
+                    "message": "Discovering new topics with UMAP+HDBSCAN..."
                 }
             )
             
@@ -509,7 +702,7 @@ class AnalysisService:
             await prisma.analysisrun.update(
                 where={"id": analysis_run_id},
                 data={
-                    "progress": 90,
+                    "progress": 85,
                     "message": "Saving new topics..."
                 }
             )
@@ -534,7 +727,7 @@ class AnalysisService:
             logger.info(f"Analysis completed: {len(similar_questions)} similar, {len(new_topics)} new topics")
             
         except Exception as e:
-            logger.error(f"Analysis failed: {e}")
+            logger.error(f"Analysis failed: {e}", exc_info=True)
             await prisma.analysisrun.update(
                 where={"id": analysis_run_id},
                 data={
@@ -548,7 +741,6 @@ class AnalysisService:
     
     async def get_questions_count(self) -> int:
         """Get count of questions available for analysis"""
-        # Count all questions (allow re-analysis)
         count = await prisma.question.count()
         return count
     
@@ -595,13 +787,11 @@ class AnalysisService:
     
     async def get_topics(self, run_id: str) -> List[Dict]:
         """Get topics discovered in a specific analysis run"""
-        # Get all questions for this run grouped by topic
         questions = await prisma.question.find_many(
             where={"analysisRunId": run_id},
             include={"topic": True}
         )
         
-        # Group by topic
         topics_dict = {}
         for q in questions:
             if q.topicId:
@@ -618,22 +808,20 @@ class AnalysisService:
     
     async def export_results(self, run_id: str) -> Dict:
         """Export complete results for an analysis run"""
-        # Get run info
         run = await prisma.analysisrun.find_unique(where={"id": run_id})
         if not run:
             raise ValueError(f"Analysis run {run_id} not found")
         
-        # Get all questions and topics
         topics = await self.get_topics(run_id)
         
         return {
             "run_id": run_id,
             "status": run.status,
-            "started_at": run.started_at.isoformat() if run.started_at else None,
-            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
-            "total_questions": run.total_questions,
-            "similar_questions": run.similar_questions,
-            "new_topics_discovered": run.new_topics_discovered,
+            "started_at": run.startedAt.isoformat() if run.startedAt else None,
+            "completed_at": run.completedAt.isoformat() if run.completedAt else None,
+            "total_questions": run.totalQuestions,
+            "similar_questions": run.similarQuestions,
+            "new_topics_discovered": run.newTopicsDiscovered,
             "topics": topics
         }
 

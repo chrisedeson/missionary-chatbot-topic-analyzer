@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Loader2, CheckCircle, AlertCircle, Clock } from "lucide-react";
+import { Loader2, CheckCircle, AlertCircle, Clock, X } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api";
 
 interface ProgressTrackerProps {
   runId: string;
+  onClose?: () => void;
 }
 
 interface ProgressUpdate {
@@ -17,11 +19,19 @@ interface ProgressUpdate {
   timestamp: string;
 }
 
-export function ProgressTracker({ runId }: ProgressTrackerProps) {
+export function ProgressTracker({ runId, onClose }: ProgressTrackerProps) {
   const [progress, setProgress] = useState<ProgressUpdate[]>([]);
   const [currentStage, setCurrentStage] = useState<string>("");
   const [overallProgress, setOverallProgress] = useState<number>(0);
   const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [isVisible, setIsVisible] = useState<boolean>(true);
+
+  const handleClose = () => {
+    setIsVisible(false);
+    onClose?.();
+  };
+
+  if (!isVisible) return null;
 
   useEffect(() => {
     if (!runId) return;
@@ -48,7 +58,15 @@ export function ProgressTracker({ runId }: ProgressTrackerProps) {
                 timestamp: new Date().toISOString(),
               };
               
-              setProgress(prev => [...prev, newUpdate]);
+              // Only add if different from last message (deduplicate consecutive identical messages)
+              setProgress(prev => {
+                const lastUpdate = prev[prev.length - 1];
+                if (lastUpdate && lastUpdate.message === newUpdate.message && lastUpdate.stage === newUpdate.stage) {
+                  return prev; // Skip duplicate
+                }
+                return [...prev, newUpdate];
+              });
+              
               setCurrentStage(data.stage);
               setOverallProgress(data.progress);
             } else if (data.type === "complete") {
@@ -57,7 +75,8 @@ export function ProgressTracker({ runId }: ProgressTrackerProps) {
               eventSource?.close();
             } else if (data.type === "error") {
               setCurrentStage("error");
-              eventSource?.close();
+              setOverallProgress(0);
+              // Don't close - let user manually close to see error
             }
           } catch (error) {
             console.error("Error parsing progress data:", error);
@@ -107,7 +126,7 @@ export function ProgressTracker({ runId }: ProgressTrackerProps) {
   };
 
   return (
-    <Card>
+    <Card className="relative">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           {getStageIcon(currentStage)}
@@ -116,6 +135,14 @@ export function ProgressTracker({ runId }: ProgressTrackerProps) {
             <span className="text-xs text-muted-foreground">(Reconnecting...)</span>
           )}
         </CardTitle>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="absolute top-4 right-4 h-6 w-6"
+          onClick={handleClose}
+        >
+          <X className="h-4 w-4" />
+        </Button>
       </CardHeader>
       
       <CardContent className="space-y-4">
