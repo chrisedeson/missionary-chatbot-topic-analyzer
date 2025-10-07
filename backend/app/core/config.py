@@ -67,13 +67,76 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE: int = 50 * 1024 * 1024  # 50MB
     UPLOAD_DIR: str = "uploads"
     
+    # Batch Processing (for embedding generation)
+    EMBEDDING_BATCH_SIZE: int = 1000  # Match reference implementation
+    EMBEDDING_RATE_LIMIT_PAUSE: int = 1  # Seconds to pause every N batches
+    
+    # Logging
+    LOG_LEVEL: str = "INFO"
+    
     class Config:
         env_file = ".env"
+        env_file_encoding = "utf-8"
         case_sensitive = True
 
 
+# Initialize settings instance
 settings = Settings()
+
 
 def get_settings() -> Settings:
     """Get application settings instance"""
     return settings
+
+
+def get_google_credentials_dict() -> dict:
+    """
+    Generate Google service account credentials dictionary from environment variables.
+    Used for Google Sheets API authentication.
+    """
+    return {
+        "type": settings.GOOGLE_SERVICE_ACCOUNT_TYPE,
+        "project_id": settings.GOOGLE_SERVICE_ACCOUNT_PROJECT_ID,
+        "private_key_id": settings.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY_ID,
+        "private_key": settings.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.replace('\\n', '\n'),  # Handle escaped newlines
+        "client_email": settings.GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL,
+        "client_id": settings.GOOGLE_SERVICE_ACCOUNT_CLIENT_ID,
+        "auth_uri": settings.GOOGLE_SERVICE_ACCOUNT_AUTH_URI,
+        "token_uri": settings.GOOGLE_SERVICE_ACCOUNT_TOKEN_URI,
+        "auth_provider_x509_cert_url": settings.GOOGLE_SERVICE_ACCOUNT_AUTH_PROVIDER_CERT_URL,
+        "client_x509_cert_url": settings.GOOGLE_SERVICE_ACCOUNT_CLIENT_CERT_URL,
+        "universe_domain": settings.GOOGLE_SERVICE_ACCOUNT_UNIVERSE_DOMAIN
+    }
+
+
+def validate_settings():
+    """
+    Validate critical settings are properly configured.
+    Called during application startup.
+    """
+    errors = []
+    
+    # Check required OpenAI settings
+    if not settings.OPENAI_API_KEY or settings.OPENAI_API_KEY == "your-api-key-here":
+        errors.append("OPENAI_API_KEY is not configured")
+    
+    # Check database URL
+    if not settings.DATABASE_URL:
+        errors.append("DATABASE_URL is not configured")
+    
+    # Check Google Sheets credentials
+    if not settings.GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL:
+        errors.append("Google Sheets credentials not configured")
+    
+    # Check security settings
+    if not settings.SECRET_KEY or settings.SECRET_KEY == "your-secret-key-here":
+        errors.append("SECRET_KEY is not configured")
+    
+    if not settings.DEV_PASSWORD or settings.DEV_PASSWORD == "your-dev-password":
+        errors.append("DEV_PASSWORD is not configured")
+    
+    if errors:
+        error_msg = "\n".join([f"  - {error}" for error in errors])
+        raise ValueError(f"Configuration errors:\n{error_msg}")
+    
+    return True

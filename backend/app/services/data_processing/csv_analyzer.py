@@ -1,3 +1,5 @@
+# backend/app/services/data_processing/csv_analyzer.py
+
 """CSV analysis and structure detection"""
 
 import pandas as pd

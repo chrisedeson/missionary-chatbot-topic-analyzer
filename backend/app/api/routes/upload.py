@@ -103,7 +103,7 @@ async def process_file(
                 "message": message,
                 "timestamp": datetime.now().isoformat()
             }
-            await sse_manager.send_to_client(proc_id, json.dumps(update_data))
+            await sse_manager.send_to_clients(proc_id, update_data)
         
         # Start processing in background
         async def run_processing():
@@ -133,7 +133,7 @@ async def process_file(
                     "error_type": "validation",
                     "timestamp": datetime.now().isoformat()
                 }
-                await sse_manager.send_to_client(processing_id, json.dumps(error_data))
+                await sse_manager.send_to_clients(processing_id, error_data)
                 
             except Exception as e:
                 # Handle other processing errors
@@ -147,7 +147,7 @@ async def process_file(
                     "error_type": "processing",
                     "timestamp": datetime.now().isoformat()
                 }
-                await sse_manager.send_to_client(processing_id, json.dumps(error_data))
+                await sse_manager.send_to_clients(processing_id, error_data)
         
         # Start background task
         background_tasks.add_task(run_processing)
@@ -190,7 +190,7 @@ async def get_processing_progress(processing_id: str):
         client_queue = None
         try:
             # Register client for updates
-            client_queue = sse_manager.add_client(processing_id)
+            client_queue = await sse_manager.add_client(processing_id)
             
             # Send initial connection event
             initial_message = json.dumps({
@@ -227,7 +227,7 @@ async def get_processing_progress(processing_id: str):
             yield f"data: {error_message}\n\n"
         finally:
             if client_queue:
-                sse_manager.remove_client(processing_id, client_queue)
+                await sse_manager.remove_client(processing_id, client_queue)
     
     return StreamingResponse(
         event_stream(),

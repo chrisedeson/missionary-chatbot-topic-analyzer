@@ -11,7 +11,7 @@ from datetime import datetime
 import logging
 
 from app.core.auth import require_developer_auth
-from app.services.analysis import analysis_service
+from app.services.analysis import get_analysis_service
 from app.services.sse import create_sse_response
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,8 @@ async def start_analysis(
     """
     try:
         logger.info(f"Starting analysis: mode={request.mode}, sample_size={request.sample_size}")
+        
+        analysis_service = await get_analysis_service()
         
         # Check if sufficient questions are available
         question_count = await analysis_service.get_questions_count()
@@ -81,6 +83,7 @@ async def get_analysis_runs(
     Requires developer authentication.
     """
     try:
+        analysis_service = await get_analysis_service()
         runs = await analysis_service.get_analysis_history(limit=limit)
         return {"runs": runs}
         
@@ -95,6 +98,7 @@ async def get_run_status(run_id: str):
     Public endpoint for status checking.
     """
     try:
+        analysis_service = await get_analysis_service()
         status = analysis_service.get_run_status(run_id)
         
         if not status:
@@ -122,6 +126,7 @@ async def get_analysis_system_status():
     Public endpoint for system health checking.
     """
     try:
+        analysis_service = await get_analysis_service()
         # Check if analysis service is running
         active_runs = len(analysis_service.active_runs)
         
@@ -151,6 +156,8 @@ async def get_run_topics(run_id: str):
     Public endpoint for viewing results.
     """
     try:
+        analysis_service = await get_analysis_service()
+        
         # Check if run exists and is completed
         run_status = analysis_service.get_run_status(run_id)
         
@@ -181,6 +188,7 @@ async def export_run_results(
     Requires developer authentication.
     """
     try:
+        analysis_service = await get_analysis_service()
         results = await analysis_service.export_results(run_id)
         return results
         

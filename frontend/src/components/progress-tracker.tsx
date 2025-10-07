@@ -99,6 +99,7 @@ export function ProgressTracker({ runId }: ProgressTrackerProps) {
   };
 
   const formatStage = (stage: string) => {
+    if (!stage) return "Processing";
     return stage
       .split("_")
       .map(word => word.charAt(0).toUpperCase() + word.slice(1))
