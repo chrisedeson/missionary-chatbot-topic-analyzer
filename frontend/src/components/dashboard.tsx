@@ -103,7 +103,7 @@ export function Dashboard({ isDeveloper }: DashboardProps) {
         <div>
           <h2 className="text-2xl font-bold">Dashboard</h2>
           <p className="text-muted-foreground">
-            Analyze student questions to discover topics and insights
+            Analyze missionary questions to discover topics and insights
           </p>
         </div>
         

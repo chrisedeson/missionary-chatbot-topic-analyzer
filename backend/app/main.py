@@ -63,7 +63,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="BYU Pathway Topic Analyzer API",
-    description="API for analyzing and managing student chatbot questions with hybrid topic discovery",
+    description="API for analyzing and managing Missionary chatbot questions with hybrid topic discovery",
     version="1.0.0",
     lifespan=lifespan,
     docs_url="/api/docs" if settings.DEBUG else None,  # Only expose docs in debug mode

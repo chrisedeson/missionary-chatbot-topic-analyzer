@@ -66,7 +66,7 @@ export default function Home() {
               <div>
                 <h1 className="text-xl font-semibold">BYU Pathway Topic Analyzer</h1>
                 <p className="text-sm text-muted-foreground">
-                  Student Question Analytics Dashboard
+                  Missionary Question Analytics Dashboard
                 </p>
               </div>
             </div>

@@ -61,7 +61,7 @@ export function AppSidebar({ isDeveloper }: AppSidebarProps) {
         <div className="px-2 py-2">
           <h2 className="text-lg font-semibold">Topic Analyzer</h2>
           <p className="text-xs text-muted-foreground">
-            Student Question Analytics
+            Missionary Question Analytics
           </p>
         </div>
       </SidebarHeader>

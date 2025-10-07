@@ -49,7 +49,7 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
             Upload Question Data
           </SheetTitle>
           <SheetDescription>
-            Upload a CSV file containing student questions for analysis
+            Upload a CSV file containing missionary questions for analysis
           </SheetDescription>
         </SheetHeader>
 

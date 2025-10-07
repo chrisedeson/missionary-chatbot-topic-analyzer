@@ -15,7 +15,7 @@ export function StatsGrid({ data }: StatsGridProps) {
       title: "Total Questions",
       value: data.question_count?.toLocaleString() || "0",
       icon: FileText,
-      description: "Student questions analyzed",
+      description: "Missionary questions analyzed",
     },
     {
       title: "Topics Discovered",
