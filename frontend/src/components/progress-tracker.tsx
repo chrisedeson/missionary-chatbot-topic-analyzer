@@ -185,34 +185,44 @@ export function ProgressTracker({ runId }: ProgressTrackerProps) {
         {/* Stage Breakdown */}
         <div className="grid grid-cols-2 gap-2 text-xs">
           {[
-            "embedding_generation",
-            "clustering",
-            "topic_extraction", 
-            "classification",
-            "finalization"
+            "generating_embeddings",
+            "classifying_questions",
+            "discovering_topics", 
+            "saving_results",
+            "complete"
           ].map((stage) => {
+            const stageOrder = [
+              "generating_embeddings",
+              "classifying_questions", 
+              "discovering_topics",
+              "saving_results",
+              "complete"
+            ];
+            const currentIndex = stageOrder.indexOf(currentStage);
+            const stageIndex = stageOrder.indexOf(stage);
+            
             const isActive = currentStage === stage;
-            const isCompleted = progress.some(p => p.stage === stage && p.progress === 100);
+            const isCompleted = currentIndex > stageIndex || currentStage === "complete";
             
             return (
               <div
                 key={stage}
                 className={`flex items-center gap-2 p-2 rounded ${
                   isActive
-                    ? "bg-blue-50 border border-blue-200"
+                    ? "bg-blue-100 border border-blue-300 text-blue-900"
                     : isCompleted
-                    ? "bg-green-50 border border-green-200"
-                    : "bg-muted"
+                    ? "bg-green-100 border border-green-400 text-green-900"
+                    : "bg-muted border text-gray-200"
                 }`}
               >
                 {isCompleted ? (
-                  <CheckCircle className="w-3 h-3 text-green-600" />
+                  <CheckCircle className="w-3 h-3 text-green-700" />
                 ) : isActive ? (
-                  <Loader2 className="w-3 h-3 animate-spin text-blue-600" />
+                  <Loader2 className="w-3 h-3 animate-spin text-blue-700" />
                 ) : (
-                  <Clock className="w-3 h-3 text-muted-foreground" />
+                  <Clock className="w-3 h-3 text-gray-400" />
                 )}
-                <span className="text-xs">{formatStage(stage)}</span>
+                <span className="text-xs font-medium">{formatStage(stage)}</span>
               </div>
             );
           })}
