@@ -31,8 +31,6 @@ export function ProgressTracker({ runId, onClose }: ProgressTrackerProps) {
     onClose?.();
   };
 
-  if (!isVisible) return null;
-
   useEffect(() => {
     if (!runId) return;
 
@@ -72,6 +70,7 @@ export function ProgressTracker({ runId, onClose }: ProgressTrackerProps) {
             } else if (data.type === "complete") {
               setOverallProgress(100);
               setCurrentStage("complete");
+              // Don't close - let user manually close with X button
               eventSource?.close();
             } else if (data.type === "error") {
               setCurrentStage("error");
@@ -124,6 +123,9 @@ export function ProgressTracker({ runId, onClose }: ProgressTrackerProps) {
       .map(word => word.charAt(0).toUpperCase() + word.slice(1))
       .join(" ");
   };
+
+  // Early return AFTER all hooks to comply with Rules of Hooks
+  if (!isVisible) return null;
 
   return (
     <Card className="relative">
